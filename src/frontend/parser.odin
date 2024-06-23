@@ -290,6 +290,22 @@ symbol_name :: proc(stmt: Statement) -> Token {
     }
 }
 
+expression_location :: proc(expr: Expression) -> shared.Rover_Location{
+    expr_start := expr[0]
+    switch expr_val in expr_start{
+        case Unary_Expression: return expr_val.operator.location
+        case Binary_Expression: return expr_val.operator.location
+        case Assignment_Expression: return expr_val.op_loc
+        case Literal_Bool: return expr_val.location
+        case Literal_Float: return expr_val.location
+        case Literal_String: return expr_val.location
+        case Literal_Int: return expr_val.location
+        case Identifier: return expr_val.location
+        case:panic("Unreachable")
+
+    }
+}
+
 Expression :: []Expression_Node
 
 Expression_Ref :: distinct i16
@@ -325,6 +341,7 @@ Unary_Expression :: struct {
 Assignment_Expression :: struct {
     lhs: Expression_Ref,
     rhs: Expression_Ref,
+    op_loc: shared.Rover_Location,
 }
 
 Operator_Token: TokenTypeSet : {
@@ -426,7 +443,7 @@ parse_infix :: proc(using parser: ^Parser, lhs: Expression_Ref) -> (expr: Expres
     }
 
     if bin_expr.operator.kind == .Equal{
-        assign_expr := Assignment_Expression{lhs = bin_expr.lhs, rhs = bin_expr.rhs}
+        assign_expr := Assignment_Expression{lhs = bin_expr.lhs, rhs = bin_expr.rhs,op_loc = bin_expr.operator.location}
         return assign_expr, true 
     }
 

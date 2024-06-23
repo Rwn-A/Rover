@@ -91,6 +91,7 @@ Type_Info :: struct {
         Type_Info_Func,
         Type_Info_Struct,
         Type_Info_Untyped_Int,
+        Type_Info_Null,
     }
 }
 
@@ -98,6 +99,7 @@ Type_Info :: struct {
 Type_Info_Integer :: struct {}
 Type_Info_Untyped_Int :: struct{}
 Type_Info_Real :: struct  {}
+Type_Info_Null :: struct {}
 Type_Info_Bool :: struct {}
 Type_Info_Byte :: struct {}
 Type_Info_Array :: struct {element_type: ^Type_Info, length: int}

@@ -53,14 +53,43 @@ x86_64_fasm :: proc(funcs: Functions) -> bool {
                     fmt.fprintfln(fd, ";;end sub\n")
                 case .Div:
                     fmt.fprintfln(fd, ";;div")
-                    fmt.fprintfln(fd, "pop rax")
                     fmt.fprintfln(fd, "pop rbx")
-                    fmt.fprintfln(fd, "div rbx, rax")
-                    fmt.fprintfln(fd, "push rbx")
-                    fmt.fprintfln(fd, ";;end div\n")      
+                    fmt.fprintfln(fd, "pop rax")
+                    fmt.fprintfln(fd, "div rbx")
+                    fmt.fprintfln(fd, "push rax")
+                    fmt.fprintfln(fd, ";;end div\n")
+                case .Store:
+                    fmt.fprintfln(fd, ";;store")
+                    fmt.fprintfln(fd, "pop rbx")
+                    fmt.fprintfln(fd, "pop rax")
+                    fmt.fprintfln(fd, "mov rdx, rbp")
+                    location := Addr_Loc(operand)
+                    switch location{
+                        case .Stack: fmt.fprintfln(fd, "sub rdx, rax")
+                        case .Param:
+                        case .Other:
+                        case: panic("Unreachable")
+                    }
+                    fmt.fprintfln(fd, "mov [rdx], rbx")
+                case .Ret:
+                    //temporary
+                    fmt.fprintfln(fd, "pop rax")
+                    fmt.fprintfln(fd, "leave")
+                    fmt.fprintln(fd, "ret")
+                case .Load:
+                    fmt.fprintfln(fd, "pop rax")
+                    fmt.fprintfln(fd, "mov rdx, rbp")
+                    location := Addr_Loc(operand)
+                    switch location{
+                        case .Stack: fmt.fprintfln(fd, "sub rdx, rax")
+                        case .Param:
+                        case .Other:
+                        case: panic("Unreachable")
+                    }
+                    fmt.fprintfln(fd, "pushq [rdx]")
+
             }
         }
-        fmt.fprintfln(fd, "pop rax") //TODO: get rid of this
         fmt.fprintfln(fd, "leave")
         fmt.fprintfln(fd, "ret")
 
