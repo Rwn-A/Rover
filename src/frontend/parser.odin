@@ -4,9 +4,7 @@ import "base:runtime"
 
 import "../shared"
 
-ast_from_bytes :: proc(source: []byte, filepath: string, sa, ua: runtime.Allocator) -> (ast: []Statement, ok: bool) {
-    context.allocator = ua
-
+ast_from_bytes :: proc(source: []byte, filepath: string, sa: runtime.Allocator) -> (ast: []Statement, ok: bool) {
     lexer := Lexer{
         sm = String_Manager{
             allocations = make([dynamic]string, sa),
@@ -70,10 +68,226 @@ parser_assert :: proc(using parser: ^Parser, expected: ..TokenType) ->  bool{
     return true
 }
 
-Statement :: Expression
+Statement :: union {
+    ^Variable_Declaration,
+    ^Function_Declaration,
+    ^Struct_Declaration,
+    ^Type_Alias,
+    ^Import,
+    Return,
+    Expression,
+}
 
-parse_statement :: proc(parser: ^Parser) -> (stmt: Statement, ok: bool) {
-    return parse_expression(parser)
+Return :: distinct Expression
+
+Variable_Declaration :: struct {
+    name: Token,
+    type: Maybe(Type_Node),
+    value: Expression,
+}
+
+Function_Declaration :: struct {
+    name: Token,
+    return_type: Maybe(Type_Node),
+    params: []Identifer_Type_Pair,
+    body: []Statement,
+}
+
+Type_Alias :: struct {
+    name: Token,
+    type: Type_Node,
+}
+
+Struct_Declaration :: struct {
+    name: Token,
+    fields: []Identifer_Type_Pair,
+}
+
+Import :: struct {
+    path: Token,
+    alias: Token,
+}
+
+Type_Node :: union {
+    ^Pointer_Type,
+    Basic_Type,
+    ^Array_type,
+    ^Slice_Type,
+}
+
+Basic_Type :: distinct Token
+
+Pointer_Type :: struct {
+    pointing_to: Type_Node
+}
+
+Slice_Type :: struct {
+    backing_type: Type_Node,
+}
+
+Array_type :: struct {
+    length_token: Token,
+    backing_type: Type_Node,
+}
+
+Identifer_Type_Pair :: struct {
+    name: Token,
+    type: Type_Node,
+}
+
+parse_statement :: proc(using parser: ^Parser) -> (stmt: Statement, ok: bool) {
+    initial := token
+    #partial switch token.kind {
+        case .Identifier:
+            if peek.kind != .Colon do return parse_expression(parser)
+            parser_assert(parser, token.kind, .Colon) or_return
+            #partial switch token.kind {
+                case .Equal: return parse_var_decl(parser, initial, nil)
+                case .Fn: return parse_function(parser, initial)
+                case .Import: return parse_import(parser, initial)
+                case .Struct: return parse_struct_decl(parser, initial)
+                case .Alias: return parse_type_alias(parser, initial)
+                case: return parse_var_decl(parser, initial, parse_type(parser) or_return)
+            }
+        case .If: unimplemented("if statements not implemented")
+        case .For: unimplemented("for loops not implemented")
+        case .While: unimplemented("while not implemented")
+        case .Return:
+            parser_advance(parser)
+            expr, ok := parse_expression(parser)
+            return cast(Return)expr, ok
+        case: return parse_expression(parser)
+    }
+
+    return nil, true
+}
+
+parse_type :: proc(using parser: ^Parser) -> (typ: Type_Node, ok: bool) {
+    tk := token
+    parser_advance(parser) or_return
+    #partial switch tk.kind {
+        case .Identifier: return cast(Basic_Type)tk, true
+        case .Hat:
+            pointer_type := new(Pointer_Type)
+            pointer_type.pointing_to = parse_type(parser) or_return
+            return pointer_type, true
+        case .Lbracket:
+            //slice
+            if token.kind == .Rbracket {
+                parser_advance(parser) or_return
+                slice_type := new(Slice_Type)
+                slice_type.backing_type = parse_type(parser) or_return
+                return slice_type, true
+            }
+            //fixed array
+            array_type := new(Array_type)
+            if token.kind != .Integer {
+                panic("arrays with out number literal length unimplemented")
+            }
+            array_type.length_token = token
+            parser_assert(parser, token.kind, .Rbracket)
+            array_type.backing_type = parse_type(parser) or_return
+            return array_type, true
+        case:
+            shared.rover_error("Unexpected token %s expected a type", token.location, token.kind)
+            return nil, false
+    }
+}
+
+parse_id_type_pair :: proc(using parser: ^Parser, end: TokenType) -> (pairs: []Identifer_Type_Pair, ok: bool) {
+    pairs_builder := make([dynamic]Identifer_Type_Pair)
+
+    for {
+        ident := token
+        parser_assert(parser, .Identifier, .Colon) or_return
+        typ := parse_type(parser) or_return
+        append(&pairs_builder, Identifer_Type_Pair{name = ident, type = typ})
+        if token.kind != .Comma do break
+        parser_advance(parser) or_return
+        if token.kind == end do break
+    }
+
+    return pairs_builder[:], true
+}
+
+parse_var_decl :: proc(using parser: ^Parser, name: Token, type: Maybe(Type_Node)) -> (stmt: Statement, ok: bool) {
+    var_decl := new(Variable_Declaration)
+    var_decl.name = name
+    var_decl.type = type
+
+    parser_assert(parser, .Equal) or_return
+
+    var_decl.value = parse_expression(parser) or_return
+
+    return var_decl, true
+}
+
+parse_type_alias :: proc(using parser: ^Parser, name: Token) -> (stmt: Statement, ok: bool) {
+    alias := new(Type_Alias)
+    parser_assert(parser, token.kind, .Equal) or_return
+    alias.name = name
+    alias.type = parse_type(parser) or_return
+    return alias, true
+}
+
+parse_struct_decl :: proc(using parser: ^Parser, name: Token) -> (stmt: Statement, ok: bool) {
+    struct_decl := new(Struct_Declaration)
+    struct_decl.name = name
+
+    parser_assert(parser, token.kind, .Equal, .Lbrace) or_return
+
+    struct_decl.fields = parse_id_type_pair(parser, .Rbrace) or_return
+
+    parser_assert(parser, .Rbrace)
+
+    return struct_decl, true
+}
+
+parse_import :: proc(using parser: ^Parser, name: Token) -> (stmt: Statement, ok: bool) {
+    import_stmt := new(Import)
+    import_stmt.alias = name
+
+    parser_assert(parser, token.kind, .Equal) or_return
+    import_stmt.path = token
+    parser_assert(parser, .String)
+
+    return import_stmt, true
+}
+
+parse_function :: proc(using parser: ^Parser, name: Token) -> (stmt: Statement, ok: bool) {
+    func_decl := new(Function_Declaration)
+    func_decl.name = name
+
+    parser_assert(parser, token.kind, .Lparen) or_return
+
+    if token.kind != .Rparen do func_decl.params = parse_id_type_pair(parser, .Rparen) or_return
+
+    parser_assert(parser, .Rparen) or_return
+    func_decl.return_type = token.kind == .Equal ? nil : parse_type(parser) or_return
+    parser_assert(parser, .Equal, .Lbrace) or_return
+
+    body_builder := make([dynamic]Statement) //great name
+
+    for token.kind != .Rbrace{
+        //TODO: try and parse another statement so multiple errors can be caught
+        append(&body_builder, parse_statement(parser) or_return) 
+    }
+
+    parser_advance(parser) or_return
+
+    func_decl.body = body_builder[:]
+
+    return func_decl, true
+}
+
+symbol_name :: proc(stmt: Statement) -> Token {
+    #partial switch value in stmt {
+        case ^Function_Declaration: return value.name
+        case ^Struct_Declaration: return value.name
+        case ^Type_Alias: return value.name
+        case ^Variable_Declaration: return value.name
+        case: panic("Cannot get symbol name for statement type")
+    }
 }
 
 Expression :: []Expression_Node
