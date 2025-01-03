@@ -1,7 +1,7 @@
 package main
 
-import "core:fmt"
+import "compiler"
 
 main :: proc() {
-    fmt.println("Hello, World!")
+   compiler.compile("test_source.rv")
 }
