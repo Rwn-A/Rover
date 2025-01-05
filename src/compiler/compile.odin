@@ -31,10 +31,10 @@ compile :: proc(filename: string) -> bool{
     
     ast := parser_parse(&parser, virtual.arena_allocator(&node_arena)) or_return
 
+    //fmt.printfln("%#v", ast)
+
     delete(source) //ast is complete, file is no longer need
 
-    fmt.printfln("%#v", ast)
-    
     ir_arena := virtual.Arena{}
     if err := virtual.arena_init_growing(&ir_arena); err != .None{
         fatal("Unable to allocate memory")
@@ -48,7 +48,7 @@ compile :: proc(filename: string) -> bool{
 
     program := ir_generate_program(&ir_context, ast) or_return
 
-    fmt.printfln("%#v", symbol_pool[:])
+    dump_ir(program)
 
     virtual.arena_destroy(&node_arena)
 

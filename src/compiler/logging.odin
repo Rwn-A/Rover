@@ -15,3 +15,23 @@ error :: proc(fmt_str: string, source_loc: File_Location, args: ..any) {
     fmt.eprintf("%s:%d:%d Error: ", source_loc.filepath, source_loc.row, source_loc.col)
     fmt.eprintfln(fmt_str, ..args)
 }
+
+dump_ir :: proc(ir: IR_Program) {
+    print_argument :: proc(arg: Argument) {
+        switch arg_val in arg{
+            case i64: fmt.printf("%v ", arg_val)
+            case Symbol_ID: fmt.printf("S%v ", arg_val)
+            case Temporary: fmt.printf("T%v ", arg_val)
+            case string: fmt.printf("%v ", arg_val)
+            case: fmt.printf("-- ")
+        }
+    }
+    for inst in ir{
+        print_argument(inst.result)
+        fmt.printf("= %v ", inst.opcode)
+        print_argument(inst.arg_1)
+        print_argument(inst.arg_2)
+        
+        fmt.println()
+    }
+}

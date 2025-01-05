@@ -1,8 +1,4 @@
-fn main() {
-    a: int = add(1, 2) + 1
+fn main(x: int) {
+    a: int = x
     a = a + 2
-}
-
-fn add(x: int, y: int) int {
-    return x + y
 }

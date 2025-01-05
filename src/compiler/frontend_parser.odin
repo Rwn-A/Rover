@@ -206,7 +206,7 @@ parse_statement :: proc(using parser: ^Parser) -> (stmt: Statement, ok: bool) {
                 //of the variable declaration node
                 peek = token
                 token = initial
-                parser.lexer.position -= 1
+                parser.lexer.position -= 2
             }
             return var_decl, true
         case .Return:
