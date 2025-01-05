@@ -23,9 +23,9 @@ Argument :: union {
 Opcode :: enum {
     Load,
     Store,
-    Assign,
     Call,
     Ret,
+    Push,
     Add,
     Sub,
     Mul,
@@ -116,8 +116,8 @@ ir_generate_statement :: proc(using ctx: ^IR_Context, st: Statement) -> bool {
             scope_register_variable(&sm, stmt_node, &current_locals_size) or_return
         case Expression_Node: ir_generate_expression(ctx, stmt_node) or_return
         case Return_Node:
-            ir_generate_expression(ctx, Expression_Node(stmt_node)) or_return
-            program_append(ctx, .Ret)
+            arg_1 := ir_generate_expression(ctx, Expression_Node(stmt_node)) or_return
+            program_append(ctx, .Ret, arg_1)
         case: unimplemented()
     }
     return true

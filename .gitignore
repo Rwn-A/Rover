@@ -1,2 +1,4 @@
 ols.json
 *.bin
+*.o
+*.out
