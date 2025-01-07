@@ -1,5 +1,9 @@
 fn main() {
-    x: int = 10
-    x = x + 2
-    return x
+   a: int = 2
+   a = dda(a)
+   return a + 7
+}
+
+fn dda(x: int) int {
+    return x + 2
 }

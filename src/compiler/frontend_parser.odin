@@ -18,8 +18,7 @@ Statement :: union {
 
 Function_Node :: struct {
     name: Token,
-    param_names: []Token,
-    param_types: []Type_Node,
+    params: []Variable_Node,
     return_type: Maybe(Type_Node),
     body: []Statement,
 }
@@ -134,10 +133,20 @@ parse_function_node :: proc(using parser: ^Parser) -> (node: Function_Node, ok: 
     node.name = parser_assert_identifier(parser) or_return
 
     parser_assert(parser, .Lparen) or_return
-    if token.kind != .Rparen{
-        node.param_names, node.param_types = parse_name_type_pairs(parser) or_return
+
+    param_builder := make([dynamic]Variable_Node)
+    for token.kind != .Rparen{
+        param_decl := parse_statement(parser) or_return
+        if param, is_param := param_decl.(Variable_Node); is_param {
+            append(&param_builder, param)
+        }else{
+            error("Expected parameter definition, got %v", node.name.location, param_decl)
+            return {}, false
+        }
+        if token.kind == .Comma do parser_advance(parser) or_return
     }
     parser_assert(parser, .Rparen) or_return
+    node.params = param_builder[:]
 
     if token.kind != .Lbrace{
         node.return_type = parse_type(parser) or_return
@@ -165,7 +174,7 @@ parse_type :: proc(using parser: ^Parser) -> (type: Type_Node, ok:bool) {
     unimplemented("other types")
 }
 
-//used for structs and function paramater definitions
+//used for structs
 @(private="file")
 parse_name_type_pairs :: proc(using parser: ^Parser) -> (names: []Token, types: []Type_Node, ok: bool) {
     //these are allocated with the ast allocator and should not be deleted
@@ -197,6 +206,8 @@ parse_statement :: proc(using parser: ^Parser) -> (stmt: Statement, ok: bool) {
             if peek.kind != .Colon do return parse_expression(parser)
             parser_advance(parser) or_return //skip name
             parser_advance(parser) or_return //skip colon
+            error("Warning: Assinging to variable of non single-token type is currently broken", token.location)
+            possible_equal_position := lexer.position
             var_decl := Variable_Node{}
             var_decl.name = initial
             var_decl.type = parse_type(parser) or_return
@@ -204,9 +215,10 @@ parse_statement :: proc(using parser: ^Parser) -> (stmt: Statement, ok: bool) {
                 //this tricks the parser into seeing the next thing as an assignment expression
                 //I wouldnt say im happy with this but i didnt want the assignment to be part
                 //of the variable declaration node
+                parser.lexer.position = possible_equal_position
                 peek = token
                 token = initial
-                parser.lexer.position -= 2
+                
             }
             return var_decl, true
         case .Return:

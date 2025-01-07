@@ -29,15 +29,16 @@ Symbol :: struct{
 }
 
 Function_Info :: struct {
-    param_names: []Token,
-    param_types: []Type_Info,
+    param_ids: []Symbol_ID,
     return_type: Type_Info,
     locals_size: int,
+    size_of_first_local: int, //when accessing locals it will be rbp - (offset + size_of_first_local)
 }
 
 Local_Info :: struct {
     address: int,
     type: Type_Info,
+    constant: bool,
 }
 
 Type_Info :: struct {
@@ -138,13 +139,6 @@ scope_register_global_declaration :: proc(using sm: ^Scope_Manager, decl_node: D
         case Function_Node:
             data := Function_Info{}
 
-            param_name_builder := make([dynamic]Token, sm.symbol_allocator)
-            param_type_builder := make([dynamic]Type_Info, sm.symbol_allocator)
-            for name in decl.param_names do append(&param_name_builder, name)
-            for type in decl.param_types do append(&param_type_builder, create_type_info(sm, type) or_return)
-            data.param_names = param_name_builder[:]
-            data.param_types = param_type_builder[:]
-
             return_type, exists := decl.return_type.?
             if !exists{
                 data.return_type = NULL_INFO
@@ -162,10 +156,11 @@ scope_register_global_declaration :: proc(using sm: ^Scope_Manager, decl_node: D
     unreachable()
 }
 
-scope_register_variable :: proc(using sm: ^Scope_Manager, decl: Variable_Node, function_size: ^int) -> bool {
+scope_register_variable :: proc(using sm: ^Scope_Manager, decl: Variable_Node, function_size: ^int, constant := false) -> bool {
     symbol := Symbol{resolved = true, name = decl.name, data = Local_Info{
         address = function_size^,
-        type = create_type_info(sm, decl.type) or_return
+        type = create_type_info(sm, decl.type) or_return,
+        constant = constant,
     }}
     function_size^ += symbol.data.(Local_Info).type.size
     scope_register(sm, symbol) or_return

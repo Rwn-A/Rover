@@ -39,6 +39,7 @@ Codegen_Context :: struct{
     current_locals_size: int,
     fd: os.Handle,
     text_buffer: []byte,
+    rbp_bump: int,
 }
 
 Size_to_asm_word :: enum {
@@ -113,12 +114,12 @@ argument_to_asm :: proc(using cc: ^Codegen_Context, argument: Argument, free_tem
             if register, in_register := location_union.(Register); in_register{
                 return fmt.bprintf(text_buffer, "%s", register)
             }
-            return fmt.bprintf(text_buffer, "QWORD [rbp - %d]", location_union.(Stack_Offset))
+            return fmt.bprintf(text_buffer, "QWORD [rbp - %d]", location_union.(Stack_Offset) + rbp_bump)
         case Symbol_ID:
             info := pool_get(cc.sp, arg).data.(Local_Info)
             //TODO, this eight should really be the size of the first local in the function
             //since we only have full word sized values, for now this is fine
-            return fmt.bprintf(text_buffer, "%s [rbp - %d]",Size_to_asm_word(info.type.size), 8 + info.address, )
+            return fmt.bprintf(text_buffer, "%s [rbp - %d]",Size_to_asm_word(info.type.size), rbp_bump + info.address, )
         case: unreachable()
     }
 }
@@ -169,7 +170,17 @@ fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
                 locals_size := info.locals_size + (16 - (info.locals_size % 16))
                 cc.current_locals_size = locals_size
                 cc.ra.next_stack_position = locals_size
+                cc.rbp_bump = info.size_of_first_local
                 fmt.fprintfln(fd, "sub rsp, %d", locals_size)
+                //edit symbol ids, such that param offsets are now correct
+                offset := 16
+                for param_id in info.param_ids{
+                    param := pool_get(sp, param_id)
+                    param_info := param.data.(Local_Info)
+                    fmt.fprintfln(fd, "mov rax, [rbp + %d]", offset)
+                    fmt.fprintfln(fd, "mov %s, rax", argument_to_asm(&cc, param_id))
+                    offset += param_info.type.size
+                }
                 fmt.fprintfln(fd, ";;--Preamble Over--")
             case .Ret:
                 fmt.fprintfln(fd, "mov rax, %s", argument_to_asm(&cc, inst.arg_1))
@@ -201,6 +212,16 @@ fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
                 slice.zero(cc.text_buffer)
                 a2 := argument_to_asm(&cc, inst.arg_2)
                 fmt.fprintfln(fd, "mov %s, %s", a1, a2)
+            case .Arg:
+                fmt.fprintfln(fd, "push %s", argument_to_asm(&cc, inst.arg_1))
+            case .Call:
+                symbol := pool_get(cc.sp, inst.arg_1.(Symbol_ID))
+                info := symbol.data.(Function_Info)
+                fmt.fprintfln(fd, "call rover_%s", ident(symbol.name))
+                if return_addr, does_return := inst.result.?; does_return {
+                    save_temporary(&cc, return_addr)
+                    fmt.fprintfln(fd, "mov %s, rax", argument_to_asm(&cc, return_addr, false))
+                }
         }
     }
 
