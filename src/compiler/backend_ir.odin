@@ -79,7 +79,6 @@ ir_generate_program :: proc(using ctx: ^IR_Context, ast: AST) -> (program: IR_Pr
     return program_buffer[:], true
 }
 
-//TODO register param in symbol tree
 ir_generate_function :: proc(using ctx: ^IR_Context, decl: Function_Node) -> bool {
     scope_open(&sm)
     defer scope_close(&sm)

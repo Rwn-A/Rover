@@ -7,6 +7,7 @@ package compiler
 import sa"core:container/small_array"
 import "core:os"
 import "core:fmt"
+import "core:strings"
 import "core:slice"
 
 Register :: enum {
@@ -38,6 +39,13 @@ Codegen_Context :: struct{
     current_locals_size: int,
     fd: os.Handle,
     text_buffer: []byte,
+}
+
+Size_to_asm_word :: enum {
+    QWORD = 8,
+    DWORD = 4,
+    WORD = 2,
+    BYTE = 1,
 }
 
 save_temporary :: proc(using cc: ^Codegen_Context, temp: Temporary) -> Memory_Location{
@@ -105,7 +113,12 @@ argument_to_asm :: proc(using cc: ^Codegen_Context, argument: Argument, free_tem
             if register, in_register := location_union.(Register); in_register{
                 return fmt.bprintf(text_buffer, "%s", register)
             }
-            return fmt.bprintf(text_buffer, "[rbp - %d]", location_union.(Stack_Offset))
+            return fmt.bprintf(text_buffer, "QWORD [rbp - %d]", location_union.(Stack_Offset))
+        case Symbol_ID:
+            info := pool_get(cc.sp, arg).data.(Local_Info)
+            //TODO, this eight should really be the size of the first local in the function
+            //since we only have full word sized values, for now this is fine
+            return fmt.bprintf(text_buffer, "%s [rbp - %d]",Size_to_asm_word(info.type.size), 8 + info.address, )
         case: unreachable()
     }
 }
@@ -158,17 +171,36 @@ fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
                 cc.ra.next_stack_position = locals_size
                 fmt.fprintfln(fd, "sub rsp, %d", locals_size)
                 fmt.fprintfln(fd, ";;--Preamble Over--")
-            case .Add:
-                result_location := require_register(&cc, inst.result.?)
-                fmt.fprintfln(fd, "mov %s, %s", result_location, argument_to_asm(&cc, inst.arg_1))
-                fmt.fprintfln(fd, "add %s, %s", result_location, argument_to_asm(&cc, inst.arg_2))
             case .Ret:
                 fmt.fprintfln(fd, "mov rax, %s", argument_to_asm(&cc, inst.arg_1))
                 fmt.fprintfln(fd, ";;Function Epilogue--")
                 fmt.fprintfln(fd, "mov rsp, rbp")
                 fmt.fprintfln(fd, "pop rbp")
                 fmt.fprintfln(fd, "ret")
-                    
+            case .Add:
+                result_location := require_register(&cc, inst.result.?)
+                fmt.fprintfln(fd, "mov %s, %s", result_location, argument_to_asm(&cc, inst.arg_1))
+                fmt.fprintfln(fd, "add %s, %s", result_location, argument_to_asm(&cc, inst.arg_2))
+            case .Load:
+                result_location := require_register(&cc, inst.result.?)
+                fmt.fprintfln(fd, "mov %s, %s", result_location, argument_to_asm(&cc, inst.arg_1))
+            case .Store:
+                final_value_register: Register
+                if temp, is_temp := inst.arg_2.(Temporary); is_temp {
+                    if register, in_register := cc.ra.temp_to_memory[temp].(Register); in_register{
+                       final_value_register = register
+                    }else{
+                        free_temporary(&cc, temp)
+                        register := require_register(&cc, temp)
+                        final_value_register = register
+                    }
+                }
+                a1_overlapped := argument_to_asm(&cc, inst.arg_1)
+                a1 := strings.clone(a1_overlapped)
+                defer delete(a1)
+                slice.zero(cc.text_buffer)
+                a2 := argument_to_asm(&cc, inst.arg_2)
+                fmt.fprintfln(fd, "mov %s, %s", a1, a2)
         }
     }
 
