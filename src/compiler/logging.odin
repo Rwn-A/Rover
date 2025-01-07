@@ -27,8 +27,8 @@ dump_ir :: proc(ir: IR_Program) {
         }
     }
     for inst in ir{
-        print_argument(inst.result)
-        fmt.printf("= %v ", inst.opcode)
+        if temp, exists := inst.result.?; exists do fmt.printf("T%d = ", temp)
+        fmt.printf("%v ", inst.opcode)
         print_argument(inst.arg_1)
         print_argument(inst.arg_2)
         

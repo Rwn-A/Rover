@@ -6,7 +6,7 @@ import sa"core:container/small_array"
 
 Instruction :: struct {
     opcode: Opcode,
-    result: Argument,
+    result: Maybe(Temporary),
     arg_1: Argument,
     arg_2: Argument,
 }
@@ -25,7 +25,6 @@ Opcode :: enum {
     Store,
     Call,
     Ret,
-    Push,
     Add,
     Sub,
     Mul,
@@ -43,7 +42,7 @@ IR_Context :: struct {
     next_new_temp: Temporary
 }
 
-program_append :: proc(using ctx: ^IR_Context, opcode: Opcode, arg1: Argument = nil, arg2: Argument = nil, result: Argument = nil) {
+program_append :: proc(using ctx: ^IR_Context, opcode: Opcode, arg1: Argument = nil, arg2: Argument = nil, result: Maybe(Temporary) = nil) {
     append(&program_buffer, Instruction{opcode = opcode, arg_1 = arg1, arg_2 = arg2, result = result})
 }
 
