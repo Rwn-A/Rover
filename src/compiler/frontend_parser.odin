@@ -206,8 +206,6 @@ parse_statement :: proc(using parser: ^Parser) -> (stmt: Statement, ok: bool) {
             if peek.kind != .Colon do return parse_expression(parser)
             parser_advance(parser) or_return //skip name
             parser_advance(parser) or_return //skip colon
-            error("Warning: Assinging to variable of non single-token type is currently broken", token.location)
-            possible_equal_position := lexer.position
             var_decl := Variable_Node{}
             var_decl.name = initial
             var_decl.type = parse_type(parser) or_return
@@ -215,7 +213,7 @@ parse_statement :: proc(using parser: ^Parser) -> (stmt: Statement, ok: bool) {
                 //this tricks the parser into seeing the next thing as an assignment expression
                 //I wouldnt say im happy with this but i didnt want the assignment to be part
                 //of the variable declaration node
-                parser.lexer.position = possible_equal_position
+                parser.lexer.position = uint(token.location.position + 1)
                 peek = token
                 token = initial
                 

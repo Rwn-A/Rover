@@ -14,6 +14,7 @@ File_Location :: struct {
     row: int,
     col: int,
     filepath: string,
+    position: int,
 }
 
 TokenKind :: enum {
@@ -84,7 +85,7 @@ Lexer :: struct {
 
 lexer_init :: proc(lexer: ^Lexer, source: []byte, filename: string, allocator: mem.Allocator) {
     lexer.position = 0
-    lexer.current_file_location = File_Location{row = 1, col = 1, filepath = filename}
+    lexer.current_file_location = File_Location{row = 1, col = 1, filepath = filename, position = 0}
     lexer.identifier_allocator = allocator
     lexer.source = source
 }
@@ -258,5 +259,5 @@ lexer_peek :: proc(using lexer: ^Lexer) -> byte {
 
 @(private="file")
 lexer_adv :: proc(using lexer: ^Lexer) {
-    current_file_location.col += 1; position += 1
+    current_file_location.col += 1; position += 1; current_file_location.position += 1
 }
