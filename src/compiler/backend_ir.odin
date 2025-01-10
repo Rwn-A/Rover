@@ -17,7 +17,6 @@ Argument :: union {
     Symbol_ID,
     Temporary,
     i64,
-    string, //label
 }
 
 Opcode :: enum {
@@ -25,6 +24,15 @@ Opcode :: enum {
     Store,
     Call,
     Ret,
+    Jmp,
+    Jz,
+    Eq,
+    Nq,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+    Label,
     Add,
     Sub,
     Mul,
@@ -42,6 +50,7 @@ IR_Context :: struct {
     free_temps: sa.Small_Array(16, Temporary),
     next_new_temp: Temporary,
     current_function: Symbol_ID,
+    next_label: int
 }
 
 program_append :: proc(using ctx: ^IR_Context, opcode: Opcode, arg1: Argument = nil, arg2: Argument = nil, result: Maybe(Temporary) = nil) {
@@ -89,6 +98,7 @@ ir_generate_function :: proc(using ctx: ^IR_Context, decl: Function_Node) -> boo
     symbol_id := scope_find(&sm, decl.name) or_return
     function_header_index := len(program_buffer)
     info, exists := &(ctx.sm.pool[symbol_id].data.(Function_Info))
+    info.size_of_first_local = -1
 
     info.param_ids = make([]Symbol_ID, len(decl.params))
     for param, i in decl.params{
@@ -124,6 +134,32 @@ ir_generate_statement :: proc(using ctx: ^IR_Context, st: Statement) -> bool {
         case Return_Node:
             arg_1 := ir_generate_expression(ctx, Expression_Node(stmt_node)) or_return
             program_append(ctx, .Ret, arg_1)
+        case If_Node:
+            scope_open(&sm)
+            defer scope_close(&sm)
+            arg_1 := ir_generate_expression(ctx, stmt_node.comparison) or_return
+            ir_release_temporary(ctx, arg_1)
+            program_append(ctx, .Jz, arg_1)
+            jump_inst_position := len(ctx.program_buffer) - 1
+            for body_node in stmt_node.body{
+                ir_generate_statement(ctx, body_node) or_return
+            }
+            if_jump_inst_position := 0
+            if len(stmt_node.else_body) > 0{
+                program_append(ctx, .Jmp)
+                if_jump_inst_position = len(ctx.program_buffer) - 1
+            }
+            program_append(ctx, .Label, i64(next_label))
+            program_buffer[jump_inst_position].arg_2 = i64(next_label)
+            next_label += 1
+            for body_node in stmt_node.else_body{
+                ir_generate_statement(ctx, body_node) or_return
+            }
+            if len(stmt_node.else_body) > 0{
+                program_append(ctx, .Label, i64(next_label))
+                program_buffer[if_jump_inst_position].arg_1 = i64(next_label)
+                next_label += 1
+            }
         case: unimplemented()
     }
     return true
@@ -155,6 +191,12 @@ ir_generate_expression :: proc(using ctx: ^IR_Context, expr: Expression_Node) ->
                     case .Dash: program_append(ctx, .Sub, arg_1, arg_2, result)
                     case .Ampersand: program_append(ctx, .Mul, arg_1, arg_2, result)
                     case .SlashForward: program_append(ctx, .Div, arg_1, arg_2, result)
+                    case .DoubleEqual: program_append(ctx, .Eq, arg_1, arg_2, result)
+                    case .LessThan: program_append(ctx, .Lt, arg_1, arg_2, result)
+                    case .LessThanEqual: program_append(ctx, .Le, arg_1, arg_2, result)
+                    case .NotEqual: program_append(ctx, .Nq, arg_1, arg_2, result)
+                    case .GreaterThan: program_append(ctx, .Gt, arg_1, arg_2, result)
+                    case .GreaterThanEqual: program_append(ctx, .Ge, arg_1, arg_2, result)
                     case: unimplemented()
                 }
                 return result, true

@@ -1,6 +1,7 @@
 package compiler
 
 import "core:mem"
+import "core:fmt"
 
 AST :: []Declaration_Node
 
@@ -14,6 +15,7 @@ Statement :: union {
     Variable_Node,
     Expression_Node,
     Return_Node,
+    If_Node,
 }
 
 Function_Node :: struct {
@@ -21,6 +23,12 @@ Function_Node :: struct {
     params: []Variable_Node,
     return_type: Maybe(Type_Node),
     body: []Statement,
+}
+
+If_Node :: struct {
+    comparison: Expression_Node,
+    body: []Statement,
+    else_body: []Statement,
 }
 
 Variable_Node :: struct {
@@ -200,7 +208,25 @@ parse_name_type_pairs :: proc(using parser: ^Parser) -> (names: []Token, types: 
 parse_statement :: proc(using parser: ^Parser) -> (stmt: Statement, ok: bool) {
     initial := token
     #partial switch initial.kind {
-        case .If: unimplemented("if")
+        case .If:
+            parser_advance(parser) or_return
+            comparision := parse_primary_expression(parser, .Lowest) or_return
+            parser_advance(parser) or_return
+            parser_assert(parser, .Lbrace) or_return
+            body_builder := make([dynamic]Statement)
+            for token.kind != .Rbrace{
+                append(&body_builder, parse_statement(parser) or_return)
+            }
+            parser_assert(parser, .Rbrace) or_return
+            if token.kind != .Else do return If_Node{comparison = comparision, body = body_builder[:]}, true
+            parser_advance(parser) or_return
+            parser_assert(parser, .Lbrace) or_return
+            else_builder := make([dynamic]Statement)
+            for token.kind != .Rbrace{
+                append(&else_builder, parse_statement(parser) or_return)
+            }
+            parser_assert(parser, .Rbrace) or_return
+            return If_Node{comparison = comparision, body = body_builder[:], else_body = else_builder[:]}, true
         case .While: unimplemented("while")
         case .Identifier:
             if peek.kind != .Colon do return parse_expression(parser)

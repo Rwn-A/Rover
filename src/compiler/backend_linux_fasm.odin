@@ -103,6 +103,19 @@ require_register :: proc(using cc: ^Codegen_Context, temp: Temporary) -> Registe
     return temp_location.(Register)
 }
 
+register_8_bit :: proc(register: Register) -> string {
+    switch register{
+        case .rcx:return "cl"
+        case .rdx:return "dl"
+        case .rsi:return "sil"
+        case .rdi:return "dil"
+        case .r8:return "r8b"
+        case .r9:return "r9b"
+        case: unreachable()
+    }
+    
+}
+
 
 
 argument_to_asm :: proc(using cc: ^Codegen_Context, argument: Argument, free_temp := true) -> string{
@@ -188,9 +201,29 @@ fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
                 fmt.fprintfln(fd, "mov rsp, rbp")
                 fmt.fprintfln(fd, "pop rbp")
                 fmt.fprintfln(fd, "ret")
-            case .Add:
+            case .Label:
+                fmt.fprintfln(fd, "rover_label_%d:", inst.arg_1)
+            case .Jz:
+                if value, is_constant := inst.arg_1.(i64); is_constant{
+                    if value == 0{
+                        fmt.fprintfln(fd, "jmp rover_label_%d", inst.arg_2)
+                    }
+                    assert(value == 0 || value == 1)
+                }else{
+                    fmt.fprintfln(fd, "cmp %s, 0", argument_to_asm(&cc, inst.arg_1))
+                }
+                
+                fmt.fprintfln(fd, "je rover_label_%d", inst.arg_2)
+            case .Jmp: fmt.fprintfln(fd, "jmp rover_label_%d", inst.arg_1)
+            case .Eq:
                 result_location := require_register(&cc, inst.result.?)
                 fmt.fprintfln(fd, "mov %s, %s", result_location, argument_to_asm(&cc, inst.arg_1))
+                fmt.fprintfln(fd, "cmp %s, %s", result_location, argument_to_asm(&cc, inst.arg_2))
+                fmt.fprintfln(fd, "sete %s", register_8_bit(result_location))
+                fmt.fprintfln(fd, "movzx %s, %s", result_location, register_8_bit(result_location))
+            case .Add:
+                result_location := require_register(&cc, inst.result.?)
+                fmt.fprintfln(fd, "mov %s, %s", argument_to_asm(&cc, inst.arg_1))
                 fmt.fprintfln(fd, "add %s, %s", result_location, argument_to_asm(&cc, inst.arg_2))
             case .Load:
                 result_location := require_register(&cc, inst.result.?)
