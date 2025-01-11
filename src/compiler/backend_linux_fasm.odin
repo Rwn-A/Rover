@@ -215,16 +215,56 @@ fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
                 
                 fmt.fprintfln(fd, "je rover_label_%d", inst.arg_2)
             case .Jmp: fmt.fprintfln(fd, "jmp rover_label_%d", inst.arg_1)
-            case .Eq:
+            case .Eq, .Lt, .Nq, .Le, .Gt, .Ge:
                 result_location := require_register(&cc, inst.result.?)
                 fmt.fprintfln(fd, "mov %s, %s", result_location, argument_to_asm(&cc, inst.arg_1))
                 fmt.fprintfln(fd, "cmp %s, %s", result_location, argument_to_asm(&cc, inst.arg_2))
-                fmt.fprintfln(fd, "sete %s", register_8_bit(result_location))
+                #partial switch inst.opcode{
+                    case .Eq: fmt.fprintfln(fd, "sete %s", register_8_bit(result_location))
+                    case .Nq: fmt.fprintfln(fd, "setne %s", register_8_bit(result_location))
+                    case .Lt: fmt.fprintfln(fd, "setl %s", register_8_bit(result_location))
+                    case .Gt: fmt.fprintfln(fd, "setg %s", register_8_bit(result_location))
+                    case .Le: fmt.fprintfln(fd, "setle %s", register_8_bit(result_location))
+                    case .Ge: fmt.fprintfln(fd, "setge %s", register_8_bit(result_location))
+                    case: unreachable()
+                }
                 fmt.fprintfln(fd, "movzx %s, %s", result_location, register_8_bit(result_location))
-            case .Add:
+            case .Add, .Sub:
                 result_location := require_register(&cc, inst.result.?)
-                fmt.fprintfln(fd, "mov %s, %s", argument_to_asm(&cc, inst.arg_1))
-                fmt.fprintfln(fd, "add %s, %s", result_location, argument_to_asm(&cc, inst.arg_2))
+                fmt.fprintfln(fd, "mov %s, %s", result_location, argument_to_asm(&cc, inst.arg_1))
+                if inst.opcode == .Sub{
+                    fmt.fprintfln(fd, "sub %s, %s", result_location, argument_to_asm(&cc, inst.arg_2))
+                }else{
+                    fmt.fprintfln(fd, "add %s, %s", result_location, argument_to_asm(&cc, inst.arg_2))
+                }
+            case .Mul:
+                result_location := require_register(&cc, inst.result.?)
+                fmt.fprintfln(fd, "mov rax, %s", argument_to_asm(&cc, inst.arg_1))
+                fmt.fprintfln(fd, "imul %s, rax, %s", result_location, argument_to_asm(&cc, inst.arg_2))
+            case .Div:
+                result_location := save_temporary(&cc, inst.result.?)
+                fmt.fprintfln(fd, "push rdx")
+                //could move other temps around and free one of the other registers
+                //but this is easier
+                fmt.fprintfln(fd, "push rbx") 
+
+                fmt.fprintfln(fd, "mov rax, %s", argument_to_asm(&cc, inst.arg_1))
+                fmt.fprintfln(fd, "cqo")
+                if num, is_num := inst.arg_2.(i64); is_num{
+                    //rdx already needs to be saved because the remainder goes here
+                    //so we can use it
+                    fmt.fprintfln(fd, "mov rbx, %d", num) 
+                    fmt.fprintfln(fd, "idiv rbx")
+
+                }else{  
+                    fmt.fprintfln(fd, "idiv %s", argument_to_asm(&cc, inst.arg_2))
+                }
+                fmt.fprintfln(fd, "pop rbx") 
+                fmt.fprintfln(fd, "pop rdx")
+        
+
+                fmt.fprintfln(fd, "mov %s, rax", result_location)
+                
             case .Load:
                 result_location := require_register(&cc, inst.result.?)
                 fmt.fprintfln(fd, "mov %s, %s", result_location, argument_to_asm(&cc, inst.arg_1))

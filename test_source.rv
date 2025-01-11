@@ -1,11 +1,5 @@
 fn main() {
-   x: int = 10
-
-   if x == 10{
-      x = 30
-   }else{
-     x = 15
-   }
+   x: int = (2 + 3 * 6) / (1 + 5 + 4)
    return x
 }
 

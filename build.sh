@@ -1,9 +1,15 @@
 odin run src
 
-fasm output.fasm
+compiled_succesfully=$?
 
-ld output.o
+if [ $compiled_succesfully -eq 0 ]; then
+   fasm output.fasm
 
-./a.out
+    ld output.o
 
-echo $?
+    ./a.out
+
+    echo $?
+else
+   echo "exiting..."
+fi

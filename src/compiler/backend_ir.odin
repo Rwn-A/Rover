@@ -189,7 +189,7 @@ ir_generate_expression :: proc(using ctx: ^IR_Context, expr: Expression_Node) ->
                 #partial switch expr_node.operator.kind {
                     case .Plus: program_append(ctx, .Add, arg_1, arg_2, result)
                     case .Dash: program_append(ctx, .Sub, arg_1, arg_2, result)
-                    case .Ampersand: program_append(ctx, .Mul, arg_1, arg_2, result)
+                    case .Asterisk: program_append(ctx, .Mul, arg_1, arg_2, result)
                     case .SlashForward: program_append(ctx, .Div, arg_1, arg_2, result)
                     case .DoubleEqual: program_append(ctx, .Eq, arg_1, arg_2, result)
                     case .LessThan: program_append(ctx, .Lt, arg_1, arg_2, result)
