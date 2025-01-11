@@ -22,6 +22,7 @@ dump_ir :: proc(ir: IR_Program) {
             case i64: fmt.printf("%v ", arg_val)
             case Symbol_ID: fmt.printf("S%v ", arg_val)
             case Temporary: fmt.printf("T%v ", arg_val)
+            case string: fmt.printf("\"%s\"", arg_val)
             case: fmt.printf("-- ")
         }
     }

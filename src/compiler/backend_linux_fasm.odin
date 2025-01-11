@@ -41,6 +41,7 @@ Codegen_Context :: struct{
     text_buffer: []byte,
     rbp_bump: int,
     defined_externals: [dynamic]string,
+    defined_strings: [dynamic]string,
 }
 
 Size_to_asm_word :: enum {
@@ -153,7 +154,8 @@ fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
         sp = sp,
         fd = fd,
         text_buffer = make([]byte, 1024),
-        defined_externals = make([dynamic]string)
+        defined_externals = make([dynamic]string),
+        defined_strings = make([dynamic]string),
     }
     for reg in Register{
         sa.push_back(&cc.ra.free_registers, reg)
@@ -163,6 +165,7 @@ fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
         delete(cc.ra.temp_to_memory)
         delete(cc.text_buffer)
         delete(cc.defined_externals)
+        delete(cc.defined_strings)
     }
 
     fmt.fprintfln(fd, "format ELF64")
@@ -199,13 +202,17 @@ fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
                 }
                 fmt.fprintfln(fd, ";;--Preamble Over--")
             case .Ret:
-                fmt.fprintfln(fd, "mov rax, %s", argument_to_asm(&cc, inst.arg_1))
+                if inst.arg_1 != nil do fmt.fprintfln(fd, "mov rax, %s", argument_to_asm(&cc, inst.arg_1))
                 fmt.fprintfln(fd, ";;Function Epilogue--")
                 fmt.fprintfln(fd, "mov rsp, rbp")
                 fmt.fprintfln(fd, "pop rbp")
                 fmt.fprintfln(fd, "ret")
             case .Label:
                 fmt.fprintfln(fd, ".rover_label_%d:", inst.arg_1)
+            case .String:
+                append(&cc.defined_strings, inst.arg_1.(string))
+                result := require_register(&cc, inst.result.?)
+                fmt.fprintfln(fd, "lea %s, [str%d]", result, len(cc.defined_strings) - 1)
             case .Jz:
                 if value, is_constant := inst.arg_1.(i64); is_constant{
                     if value == 0{
@@ -365,6 +372,11 @@ fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
                 
                 
         }
+    }
+
+    fmt.fprintfln(fd, "section '.data' writeable")
+    for str, i in cc.defined_strings{
+        fmt.fprintfln(fd, "str%d: db \'%s\',0", i, str)
     }
 
     return true

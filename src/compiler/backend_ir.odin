@@ -17,6 +17,7 @@ Argument :: union {
     Symbol_ID,
     Temporary,
     i64,
+    string,
 }
 
 Opcode :: enum {
@@ -34,6 +35,7 @@ Opcode :: enum {
     Le,
     Ge,
     Label,
+    String,
     Add,
     Sub,
     Mul,
@@ -117,6 +119,13 @@ ir_generate_function :: proc(using ctx: ^IR_Context, decl: Function_Node) -> boo
 
     for node in decl.body do ir_generate_statement(ctx, node) or_return
 
+    //check if an explicit return is at the end of function
+    //if not add the return instruction
+    inst := ctx.program_buffer[len(ctx.program_buffer) - 1]
+    if inst.opcode != .Ret{
+        program_append(ctx, .Ret)
+    }
+
     inject_at(&program_buffer, function_header_index, Instruction{opcode = .Function, arg_1 = symbol_id})
     
     assert(exists)
@@ -188,6 +197,10 @@ ir_generate_statement :: proc(using ctx: ^IR_Context, st: Statement) -> bool {
 ir_generate_expression :: proc(using ctx: ^IR_Context, expr: Expression_Node) -> (arg: Argument, ok: bool) {
        #partial switch expr_node in expr{
         case Literal_Int: return expr_node.data.(i64), true
+        case Literal_String:
+            result := ir_use_temporary(ctx)
+            program_append(ctx, .String, expr_node.data.(string), nil, result)
+            return result, true
         case Identifier_Node:
             symbol_id := scope_find(&ctx.sm, Token(expr_node)) or_return
             result := ir_use_temporary(ctx)

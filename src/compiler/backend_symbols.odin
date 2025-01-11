@@ -125,6 +125,12 @@ scope_register_builtin_types :: proc(using sm: ^Scope_Manager) {
     scope_register(sm,  Symbol{resolved = true, name=Token{data = "int", kind = .Identifier}, data = INTEGER_INFO})
     scope_register(sm,  Symbol{resolved = true, name=Token{data = "bool", kind = .Identifier}, data = BOOL_INFO})
     scope_register(sm,  Symbol{resolved = true, name=Token{data = "byte", kind = .Identifier}, data = BYTE_INFO})
+    
+    string_info := Type_Info{
+        size = 8,
+        data = Type_Info_Pointer{&BYTE_INFO},
+    }
+    scope_register(sm,  Symbol{resolved = true, name=Token{data = "cstring", kind = .Identifier}, data = string_info})
 }
 
 create_type_info :: proc(using sm: ^Scope_Manager, ast_node: Type_Node) -> (info: Type_Info, ok: bool) {

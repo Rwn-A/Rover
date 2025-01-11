@@ -1,4 +1,2 @@
 ols.json
-*.bin
-*.o
-*.out
+build_artifacts
