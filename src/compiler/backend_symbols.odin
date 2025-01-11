@@ -25,6 +25,8 @@ Symbol :: struct{
         Type_Info,
         Function_Info,
         Local_Info,
+        Foreign_Info,
+        Foreign_Global_Info,
     }
 }
 
@@ -34,6 +36,13 @@ Function_Info :: struct {
     locals_size: int,
     size_of_first_local: int, //when accessing locals it will be rbp - (offset + size_of_first_local)
 }
+
+Foreign_Info :: struct {
+    return_type: Type_Info,
+    num_args: int,
+}
+
+Foreign_Global_Info :: distinct Type_Info
 
 Local_Info :: struct {
     address: int,
@@ -133,7 +142,7 @@ create_type_info :: proc(using sm: ^Scope_Manager, ast_node: Type_Node) -> (info
             pointing_at := new(Type_Info, symbol_allocator)
             pointing_at^ = create_type_info(sm, ast_type.pointing_at^) or_return
             return Type_Info{data = Type_Info_Pointer{pointing_at = pointing_at}, size = 8}, true
-        case: unreachable()
+        case: panic("unreachable")
     }
 }
 
@@ -156,8 +165,32 @@ scope_register_global_declaration :: proc(using sm: ^Scope_Manager, decl_node: D
             symbol.resolved = true
             symbol.data = data
             return true 
+        case Foreign_Function_Node:
+            data := Foreign_Info{}
+
+            return_type, exists := decl.return_type.?
+            if !exists{
+                data.return_type = NULL_INFO
+            }else{
+                data.return_type = create_type_info(sm, decl.return_type.?) or_return
+            }
+            data.num_args = len(decl.param_types)
+
+            symbol := &pool[scope_find(sm, decl.name) or_return] 
+            symbol.resolved = true
+            symbol.data = data
+            return true 
+        
+        case Foreign_Global_Node:
+            type := create_type_info(sm, decl.type) or_return
+            symbol := &pool[scope_find(sm, decl.name) or_return] 
+            symbol.resolved = true
+            symbol.data = Foreign_Global_Info(type)
+            return true
+
+
     }
-    unreachable()
+    panic("unreachable")
 }
 
 scope_register_variable :: proc(using sm: ^Scope_Manager, decl: Variable_Node, function_size: ^int, constant := false) -> bool {

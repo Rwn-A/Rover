@@ -11,10 +11,10 @@ import "core:strings"
 import "core:slice"
 
 Register :: enum {
+    rdi,
+    rsi,
     rcx,
     rdx,
-    rsi,
-    rdi,
     r8,
     r9,
 }
@@ -40,6 +40,7 @@ Codegen_Context :: struct{
     fd: os.Handle,
     text_buffer: []byte,
     rbp_bump: int,
+    defined_externals: [dynamic]string,
 }
 
 Size_to_asm_word :: enum {
@@ -111,7 +112,7 @@ register_8_bit :: proc(register: Register) -> string {
         case .rdi:return "dil"
         case .r8:return "r8b"
         case .r9:return "r9b"
-        case: unreachable()
+        case: panic("unreachable")
     }
     
 }
@@ -133,7 +134,7 @@ argument_to_asm :: proc(using cc: ^Codegen_Context, argument: Argument, free_tem
             //TODO, this eight should really be the size of the first local in the function
             //since we only have full word sized values, for now this is fine
             return fmt.bprintf(text_buffer, "%s [rbp - %d]",Size_to_asm_word(info.type.size), rbp_bump + info.address, )
-        case: unreachable()
+        case: panic("unreachable")
     }
 }
 
@@ -152,6 +153,7 @@ fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
         sp = sp,
         fd = fd,
         text_buffer = make([]byte, 1024),
+        defined_externals = make([dynamic]string)
     }
     for reg in Register{
         sa.push_back(&cc.ra.free_registers, reg)
@@ -160,6 +162,7 @@ fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
         delete(cc.ra.free_stack_positions)
         delete(cc.ra.temp_to_memory)
         delete(cc.text_buffer)
+        delete(cc.defined_externals)
     }
 
     fmt.fprintfln(fd, "format ELF64")
@@ -231,7 +234,7 @@ fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
                     case .Gt: fmt.fprintfln(fd, "setg %s", register_8_bit(result_location))
                     case .Le: fmt.fprintfln(fd, "setle %s", register_8_bit(result_location))
                     case .Ge: fmt.fprintfln(fd, "setge %s", register_8_bit(result_location))
-                    case: unreachable()
+                    case: panic("unreachable")
                 }
                 fmt.fprintfln(fd, "movzx %s, %s", result_location, register_8_bit(result_location))
             case .Add, .Sub:
@@ -272,6 +275,21 @@ fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
                 
             case .Load:
                 result_location := require_register(&cc, inst.result.?)
+                if symbol_id, is_symbol := inst.arg_1.(Symbol_ID); is_symbol{
+                    symbol := pool_get(cc.sp, symbol_id)
+                    if _, is_foreign := symbol.data.(Foreign_Global_Info); is_foreign{
+                        already_externed := false
+                        for name in cc.defined_externals{
+                            if name == ident(symbol.name) do already_externed = true
+                        }
+                        if !already_externed{
+                            fmt.fprintfln(fd, "extrn %s", ident(symbol.name))
+                            append(&cc.defined_externals, ident(symbol.name))
+                        }
+                        fmt.fprintfln(fd, "mov %s, [%s]", result_location, ident(symbol.name))
+                        continue
+                    }
+                }
                 if temp, is_temp := inst.arg_1.(Temporary); is_temp{
                     fmt.fprintfln(fd, "mov %s, [%s]", result_location, argument_to_asm(&cc, inst.arg_1))
                 }else{ 
@@ -306,12 +324,46 @@ fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
                 fmt.fprintfln(fd, "push %s", argument_to_asm(&cc, inst.arg_1))
             case .Call:
                 symbol := pool_get(cc.sp, inst.arg_1.(Symbol_ID))
-                info := symbol.data.(Function_Info)
-                fmt.fprintfln(fd, "call rover_%s", ident(symbol.name))
-                if return_addr, does_return := inst.result.?; does_return {
-                    save_temporary(&cc, return_addr)
-                    fmt.fprintfln(fd, "mov %s, rax", argument_to_asm(&cc, return_addr, false))
+                if info, is_rover_func := symbol.data.(Function_Info); is_rover_func{
+                    fmt.fprintfln(fd, "call rover_%s", ident(symbol.name))
+                    if return_addr, does_return := inst.result.?; does_return {
+                        save_temporary(&cc, return_addr)
+                        fmt.fprintfln(fd, "mov %s, rax", argument_to_asm(&cc, return_addr, false))
+                    }
+                }else{
+                    //TODO deal with stack alignment issues when passing paramaters on stack
+                    info := symbol.data.(Foreign_Info)
+                    for i in 0..<info.num_args{
+                        if Register(i) < Register.r9{
+                            fmt.fprintfln(fd, "pop %s", Register(i))
+                        }else{
+                            fatal("Cannot call foreign functions with over 7 parameters yet")
+                        }
+                        //value should still be on the stack from the arg instruction
+                    }
+                    fmt.fprintfln(fd, "xor rax, rax")
+                    fmt.fprintfln(fd, "push rbx")
+                    fmt.fprintfln(fd, "mov rbx, rsp")
+                    fmt.fprintfln(fd, "and rsp, 0xFFFFFFFFFFFFFFF0")
+                    already_externed := false
+                    for name in cc.defined_externals{
+                        if name == ident(symbol.name) do already_externed = true
+                    }
+                    if !already_externed{
+                        fmt.fprintfln(fd, "extrn %s", ident(symbol.name))
+                        append(&cc.defined_externals, ident(symbol.name))
+                    }
+                    
+                    fmt.fprintfln(fd, "call %s", ident(symbol.name))
+                    if return_addr, does_return := inst.result.?; does_return {
+                        save_temporary(&cc, return_addr)
+                        fmt.fprintfln(fd, "mov %s, rax", argument_to_asm(&cc, return_addr, false))
+                    }
+                    fmt.fprintfln(fd, "mov rsp, rbx")
+                    fmt.fprintfln(fd, "pop rbx")
                 }
+                
+                
         }
     }
 

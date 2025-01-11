@@ -36,6 +36,7 @@ TokenKind :: enum {
     True,
     False,
     Struct,
+    Foreign,
 
     Dot,
     Comma,
@@ -177,6 +178,7 @@ lexer_lex_word :: proc(using lexer: ^Lexer) -> (TokenKind, TokenData) {
         case "fn": kind = .Fn
         case "true": kind = .True
         case "false": kind = .False
+        case "foreign": kind = .Foreign
     }
 
     if kind != .Identifier do return kind, nil //keywords dont need data

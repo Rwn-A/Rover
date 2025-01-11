@@ -76,6 +76,8 @@ ir_generate_program :: proc(using ctx: ^IR_Context, ast: AST) -> (program: IR_Pr
     for decl_node in ast{
         switch decl in decl_node{
             case Function_Node: scope_register(&sm, Symbol{resolved = false, name = decl.name, data=nil}) or_return
+            case Foreign_Function_Node: scope_register(&sm, Symbol{resolved = false, name = decl.name, data = nil}) or_return
+            case Foreign_Global_Node: scope_register(&sm, Symbol{resolved = false, name = decl.name, data = nil}) or_return
         }
     }
 
@@ -241,14 +243,20 @@ ir_generate_expression :: proc(using ctx: ^IR_Context, expr: Expression_Node) ->
         case Function_Call_Node:
             callee := scope_find(&sm, expr_node.name) or_return
             symbol := pool_get(sm.pool, callee)
-            data := symbol.data.(Function_Info)
-            //reverse to place first arg in the last position on the stack
+
             #reverse for argument in expr_node.args{
                 arg_1 := ir_generate_expression(ctx, argument) or_return
                 ir_release_temporary(ctx, arg_1)
                 program_append(ctx, .Arg, arg_1)
             }
-            result: Maybe(Temporary) = ir_use_temporary(ctx) if data.return_type.size > 0 else nil
+            result: Maybe(Temporary) 
+            #partial switch data in symbol.data{
+                case Foreign_Info:
+                    result = ir_use_temporary(ctx) if data.return_type.size > 0 else nil
+                case Function_Info:
+                    result = ir_use_temporary(ctx) if data.return_type.size > 0 else nil
+                case: panic("unreachable")
+            }
             program_append(ctx, .Call, callee, nil, result)
             if res, ok := result.?; ok do return res, true
             return nil, true

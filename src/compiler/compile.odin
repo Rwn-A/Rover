@@ -48,8 +48,6 @@ compile :: proc(filename: string) -> bool{
 
     program := ir_generate_program(&ir_context, ast) or_return
 
-    dump_ir(program)
-
     virtual.arena_destroy(&node_arena)
 
     fasm_linux_generate(&symbol_pool, program) or_return
