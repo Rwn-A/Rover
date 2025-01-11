@@ -25,6 +25,7 @@ Opcode :: enum {
     Call,
     Ret,
     Jmp,
+    Addr_Of,
     Jz,
     Eq,
     Nq,
@@ -138,8 +139,8 @@ ir_generate_statement :: proc(using ctx: ^IR_Context, st: Statement) -> bool {
             scope_open(&sm)
             defer scope_close(&sm)
             arg_1 := ir_generate_expression(ctx, stmt_node.comparison) or_return
-            ir_release_temporary(ctx, arg_1)
             program_append(ctx, .Jz, arg_1)
+            ir_release_temporary(ctx, arg_1)
             jump_inst_position := len(ctx.program_buffer) - 1
             for body_node in stmt_node.body{
                 ir_generate_statement(ctx, body_node) or_return
@@ -160,6 +161,23 @@ ir_generate_statement :: proc(using ctx: ^IR_Context, st: Statement) -> bool {
                 program_buffer[if_jump_inst_position].arg_1 = i64(next_label)
                 next_label += 1
             }
+        case While_Node:
+            scope_open(&sm)
+            defer scope_close(&sm)
+            continue_label := next_label
+            next_label += 1
+            program_append(ctx, .Label, i64(continue_label))
+            arg_1 := ir_generate_expression(ctx, stmt_node.condition) or_return
+            program_append(ctx, .Jz, arg_1)
+            jump_inst_position := len(ctx.program_buffer) - 1
+            ir_release_temporary(ctx, arg_1)
+            for body_node in stmt_node.body{
+                ir_generate_statement(ctx, body_node) or_return
+            }
+            program_append(ctx, .Jmp, i64(continue_label))
+            program_append(ctx, .Label, i64(next_label))
+            program_buffer[jump_inst_position].arg_2 = i64(next_label)
+            next_label += 1
         case: unimplemented()
     }
     return true
@@ -175,9 +193,10 @@ ir_generate_expression :: proc(using ctx: ^IR_Context, expr: Expression_Node) ->
             return result, true
         case ^Binary_Expression_Node: 
             if expr_node.operator.kind == .Equal{
-               arg_1 := scope_find(&ctx.sm, Token(expr_node.lhs.(Identifier_Node))) or_return
+                arg_1 := ir_lvalue(ctx, expr_node.lhs) or_return
                arg_2 := ir_generate_expression(ctx, expr_node.rhs) or_return
                defer ir_release_temporary(ctx, arg_2)
+               defer ir_release_temporary(ctx, arg_1)
                program_append(ctx, .Store, arg_1, arg_2)
                return nil, true
             }else{
@@ -201,6 +220,24 @@ ir_generate_expression :: proc(using ctx: ^IR_Context, expr: Expression_Node) ->
                 }
                 return result, true
             }
+        case ^Unary_Expression_Node:
+            #partial switch expr_node.operator.kind{
+                case .Ampersand: 
+                    arg_1 := ir_lvalue(ctx, expr_node.rhs) or_return
+                    defer ir_release_temporary(ctx, arg_1)
+                    result := ir_use_temporary(ctx)
+                    program_append(ctx, .Addr_Of, arg_1, nil, result)
+                    return result, true
+                case .Hat:
+                    arg_1 := ir_generate_expression(ctx, expr_node.rhs) or_return
+                    defer ir_release_temporary(ctx, arg_1)
+                    result := ir_use_temporary(ctx)
+                    program_append(ctx, .Load, arg_1, nil, result)
+                    return result, true
+                case:
+                    error("Not a unary operator %s", expr_node.operator.location, expr_node.operator.kind)
+                    return nil, false
+            }
         case Function_Call_Node:
             callee := scope_find(&sm, expr_node.name) or_return
             symbol := pool_get(sm.pool, callee)
@@ -218,7 +255,25 @@ ir_generate_expression :: proc(using ctx: ^IR_Context, expr: Expression_Node) ->
 
         case: unimplemented()
     }
-    unreachable()
+}
+
+ir_lvalue :: proc(using ctx: ^IR_Context, expr: Expression_Node) -> (res: Argument, ok: bool) {
+    #partial switch expr_node in expr{
+        case Identifier_Node:
+            symbol_id := scope_find(&ctx.sm, Token(expr_node)) or_return
+            return symbol_id, true
+        case ^Unary_Expression_Node:
+            if expr_node.operator.kind != .Hat{
+                error("Expected a dereferance operator got %s", expr_node.operator.location, expr_node.operator.kind)
+                return nil, false
+            }
+            result := ir_use_temporary(ctx)
+            arg_1 := ir_lvalue(ctx, expr_node.rhs) or_return
+            defer ir_release_temporary(ctx, arg_1)
+            program_append(ctx, .Load, arg_1, nil, result)
+            return result, true
+        case: unimplemented()
+    }
 }
 
 ir_use_temporary :: proc(using ctx: ^IR_Context) -> Temporary{

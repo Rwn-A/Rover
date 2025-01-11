@@ -58,7 +58,7 @@ Type_Info_Float :: struct  {}
 Type_Info_Null :: struct {}
 Type_Info_Bool :: struct {}
 Type_Info_Byte :: struct {}
-Type_Info_Pointer :: struct {element_type: ^Type_Info}
+Type_Info_Pointer :: struct {pointing_at: ^Type_Info}
 
 
 scope_open :: proc(using sm: ^Scope_Manager) {
@@ -118,7 +118,7 @@ scope_register_builtin_types :: proc(using sm: ^Scope_Manager) {
     scope_register(sm,  Symbol{resolved = true, name=Token{data = "byte", kind = .Identifier}, data = BYTE_INFO})
 }
 
-create_type_info :: proc(using sm: ^Scope_Manager, ast_node: Type_Node) -> (Type_Info, bool) {
+create_type_info :: proc(using sm: ^Scope_Manager, ast_node: Type_Node) -> (info: Type_Info, ok: bool) {
     switch ast_type in ast_node{
         case Symbol_Type:
             symbol_id, exists := scope_find(sm, ast_type)
@@ -129,7 +129,11 @@ create_type_info :: proc(using sm: ^Scope_Manager, ast_node: Type_Node) -> (Type
                 return {}, false
             }
             return info, true
-        case: unimplemented("other types besides builtin")
+        case Pointer_Type:
+            pointing_at := new(Type_Info, symbol_allocator)
+            pointing_at^ = create_type_info(sm, ast_type.pointing_at^) or_return
+            return Type_Info{data = Type_Info_Pointer{pointing_at = pointing_at}, size = 8}, true
+        case: unreachable()
     }
 }
 

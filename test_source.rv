@@ -1,5 +1,9 @@
 fn main() {
-   x: int = (2 + 3 * 6) / (1 + 5 + 4)
+   x: int
+   x = 20
+   b: &int
+   b = &x
+   ^b = 10
    return x
 }
 

@@ -16,6 +16,7 @@ Statement :: union {
     Expression_Node,
     Return_Node,
     If_Node,
+    While_Node,
 }
 
 Function_Node :: struct {
@@ -31,15 +32,23 @@ If_Node :: struct {
     else_body: []Statement,
 }
 
+While_Node :: struct {
+    condition: Expression_Node,
+    body: []Statement,
+}
+
 Variable_Node :: struct {
     name: Token,
     type: Type_Node,
 }
 
 Symbol_Type :: Token
+Pointer_Type :: struct {
+    pointing_at: ^Type_Node,
+}
 Type_Node :: union {
-    Symbol_Type //types defined by a single symbol
-    //pointer type
+    Symbol_Type, //types defined by a single symbol
+    Pointer_Type,
 }
 
 Return_Node :: distinct Expression_Node
@@ -175,11 +184,19 @@ parse_function_node :: proc(using parser: ^Parser) -> (node: Function_Node, ok: 
 @(private="file")
 parse_type :: proc(using parser: ^Parser) -> (type: Type_Node, ok:bool) {
     initial := token
-    if initial.kind == .Identifier{
-        parser_advance(parser) or_return
-        return Symbol_Type(initial), true
+    #partial switch initial.kind {
+        case .Identifier:
+            parser_advance(parser) or_return
+            return Symbol_Type(initial), true 
+        case .Ampersand:
+            parser_advance(parser) or_return
+            pointing_at := new(Type_Node)
+            pointing_at^ = parse_type(parser) or_return
+            return Pointer_Type{pointing_at = pointing_at}, true
+        case:
+            error("Expected a type got %s", initial.location, initial.kind)
+            return nil, false
     }
-    unimplemented("other types")
 }
 
 //used for structs
@@ -227,7 +244,17 @@ parse_statement :: proc(using parser: ^Parser) -> (stmt: Statement, ok: bool) {
             }
             parser_assert(parser, .Rbrace) or_return
             return If_Node{comparison = comparision, body = body_builder[:], else_body = else_builder[:]}, true
-        case .While: unimplemented("while")
+        case .While:
+            parser_advance(parser) or_return
+            comparision := parse_primary_expression(parser, .Lowest) or_return
+            parser_advance(parser) or_return
+            parser_assert(parser, .Lbrace) or_return
+            body_builder := make([dynamic]Statement)
+            for token.kind != .Rbrace{
+                append(&body_builder, parse_statement(parser) or_return)
+            }
+            parser_assert(parser, .Rbrace) or_return
+            return While_Node{condition = comparision, body = body_builder[:]}, true
         case .Identifier:
             if peek.kind != .Colon do return parse_expression(parser)
             parser_advance(parser) or_return //skip name

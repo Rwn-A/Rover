@@ -202,19 +202,24 @@ fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
                 fmt.fprintfln(fd, "pop rbp")
                 fmt.fprintfln(fd, "ret")
             case .Label:
-                fmt.fprintfln(fd, "rover_label_%d:", inst.arg_1)
+                fmt.fprintfln(fd, ".rover_label_%d:", inst.arg_1)
             case .Jz:
                 if value, is_constant := inst.arg_1.(i64); is_constant{
                     if value == 0{
-                        fmt.fprintfln(fd, "jmp rover_label_%d", inst.arg_2)
+                        fmt.fprintfln(fd, "jmp .rover_label_%d", inst.arg_2)
                     }
                     assert(value == 0 || value == 1)
                 }else{
                     fmt.fprintfln(fd, "cmp %s, 0", argument_to_asm(&cc, inst.arg_1))
                 }
                 
-                fmt.fprintfln(fd, "je rover_label_%d", inst.arg_2)
-            case .Jmp: fmt.fprintfln(fd, "jmp rover_label_%d", inst.arg_1)
+                fmt.fprintfln(fd, "je .rover_label_%d", inst.arg_2)
+            case .Jmp: fmt.fprintfln(fd, "jmp .rover_label_%d", inst.arg_1)
+            case .Addr_Of:
+                result := require_register(&cc, inst.result.?)
+                info := pool_get(cc.sp, inst.arg_1.(Symbol_ID)).data.(Local_Info)
+                fmt.fprintfln(fd, "mov %s, rbp", result)
+                fmt.fprintfln(fd, "sub %s, %d", result, info.address + cc.rbp_bump)
             case .Eq, .Lt, .Nq, .Le, .Gt, .Ge:
                 result_location := require_register(&cc, inst.result.?)
                 fmt.fprintfln(fd, "mov %s, %s", result_location, argument_to_asm(&cc, inst.arg_1))
@@ -267,7 +272,11 @@ fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
                 
             case .Load:
                 result_location := require_register(&cc, inst.result.?)
-                fmt.fprintfln(fd, "mov %s, %s", result_location, argument_to_asm(&cc, inst.arg_1))
+                if temp, is_temp := inst.arg_1.(Temporary); is_temp{
+                    fmt.fprintfln(fd, "mov %s, [%s]", result_location, argument_to_asm(&cc, inst.arg_1))
+                }else{ 
+                    fmt.fprintfln(fd, "mov %s, %s", result_location, argument_to_asm(&cc, inst.arg_1))
+                }
             case .Store:
                 final_value_register: Register
                 if temp, is_temp := inst.arg_2.(Temporary); is_temp {
@@ -284,7 +293,15 @@ fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
                 defer delete(a1)
                 slice.zero(cc.text_buffer)
                 a2 := argument_to_asm(&cc, inst.arg_2)
-                fmt.fprintfln(fd, "mov %s, %s", a1, a2)
+                if temp, is_temp := inst.arg_1.(Temporary); is_temp{
+                    fmt.fprintfln(fd, "push rbx")
+                    fmt.fprintfln(fd, "mov rbx, %s", a1)
+                    fmt.fprintfln(fd, "mov QWORD [rbx], %s", a2)
+                    fmt.fprintfln(fd, "pop rbx")
+
+                }else{ 
+                    fmt.fprintfln(fd, "mov %s, %s", a1, a2)
+                }
             case .Arg:
                 fmt.fprintfln(fd, "push %s", argument_to_asm(&cc, inst.arg_1))
             case .Call:
