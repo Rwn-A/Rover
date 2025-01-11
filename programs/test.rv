@@ -1,0 +1,7 @@
+foreign fn puts(cstring, &int);
+foreign stdout: &int;
+
+fn main() {
+   puts("Hello, World!", stdout)
+}
+
