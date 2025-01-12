@@ -1,5 +1,5 @@
 # Rover
-A small, procedural programming language that compiles to x86-64 assembly. Compatible with Linux only. Possibly partially compatible with MacOS but that is untested and I don't plan on supporting it. When not using libc the language produces static executables and has no runtime. The language is very much in development. Nothing is stable the semantics and syntax may change and that may not be immediately updated in the README. 
+A small, procedural programming language that compiles to x86-64 assembly. Compatible with Linux only. When not using libc the language produces static executables and has no runtime. The language is very much in development. Nothing is stable the semantics and syntax may change and that may not be immediately updated in the README. 
 
 ## Language Features
 Rover supports, or plans to support, a simple set of features similiar to a C.
@@ -26,7 +26,7 @@ Planned features include:
 
 I have no intention of adding optimizations to the compiler or to make the compiler capable of spotting most errors in the code. Type checking may be implemented but deeper semantic analysis likely will not.
 
-## Feature Referance
+## Feature Reference
 
 ### A basic Hello, World!
 ```rust
@@ -34,8 +34,8 @@ fn main() {
     print("Hello, World!")
 }
 ```
-Since we can syscall directly on Linux the most basic hello world program in Rover is about 8kB.
-Playing around with the linker I got it down to 4kB but I am not a linker expert and one could likely get it down much smaller. The executable produced is also statically linked.
+Since we can syscall directly on Linux the most basic hello world program in Rover is about 1kB when using gold instead of ld.
+Playing around with gold I got it down to just under 600B but I am not a linker expert and one could likely get it down much smaller.
 
 **Remaining features will be undocumented until language matures.**
 

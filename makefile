@@ -12,7 +12,17 @@ build: roverc builtin $(SOURCE_FILE)
 	fasm output.asm > /dev/null
 	ld -o program output.o builtin.o
 
-#ld -o program output.o -L. -dynamic-linker /lib64/ld-linux-x86-64.so.2 -lc
+build_gold: roverc builtin $(SOURCE_FILE)
+	./roverc $(SOURCE_FILE)
+	fasm output.asm > /dev/null
+	gold -o program output.o builtin.o --strip-all -n -O3
+	strip --remove-section=.note.gnu.gold-version program
+
+
+libc_only: roverc $(SOURCE_FILE)
+	./roverc $(SOURCE_FILE)
+	fasm output.asm > /dev/null
+	ld -o program output.o -L. -dynamic-linker /lib64/ld-linux-x86-64.so.2 -lc
 
 run: build
 	./program

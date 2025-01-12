@@ -40,6 +40,7 @@ Function_Info :: struct {
 Foreign_Info :: struct {
     return_type: Type_Info,
     num_args: int,
+    builtin: bool,
 }
 
 Foreign_Global_Info :: distinct Type_Info
@@ -137,6 +138,7 @@ scope_register_builtins :: proc(using sm: ^Scope_Manager) {
     print_foreign_info := Foreign_Info{
         return_type = NULL_INFO,
         num_args = 1,
+        builtin = true,
     }
     scope_register(sm, Symbol{resolved = true, name=Token{data = "print", kind = .Identifier}, data=print_foreign_info})
 }

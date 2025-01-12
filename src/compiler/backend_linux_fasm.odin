@@ -349,10 +349,13 @@ fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
                         }
                         //value should still be on the stack from the arg instruction
                     }
-                    fmt.fprintfln(fd, "xor rax, rax")
-                    fmt.fprintfln(fd, "push rbx")
-                    fmt.fprintfln(fd, "mov rbx, rsp")
-                    fmt.fprintfln(fd, "and rsp, 0xFFFFFFFFFFFFFFF0")
+                    
+                    //fmt.fprintfln(fd, "push rbx")
+                    //fmt.fprintfln(fd, "mov rbx, rsp")
+                    if !info.builtin {
+                        fmt.fprintfln(fd, "xor rax, rax")
+                        fmt.fprintfln(fd, "and rsp, 0xFFFFFFFFFFFFFFF0")
+                    }
                     already_externed := false
                     for name in cc.defined_externals{
                         if name == ident(symbol.name) do already_externed = true
@@ -367,8 +370,8 @@ fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
                         save_temporary(&cc, return_addr)
                         fmt.fprintfln(fd, "mov %s, rax", argument_to_asm(&cc, return_addr, false))
                     }
-                    fmt.fprintfln(fd, "mov rsp, rbx")
-                    fmt.fprintfln(fd, "pop rbx")
+                    //fmt.fprintfln(fd, "mov rsp, rbx")
+                    //fmt.fprintfln(fd, "pop rbx")
                 }
                 
                 
