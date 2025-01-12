@@ -1,5 +1,5 @@
 # Rover
-A small, procedural programming language that compiles to x86-64 assembly. Compatible with Linux only. Possibly partially compatible with MacOS but that is untested and I don't plan on supporting it. The language is very much in development. Nothing is stable the semantics and syntax may change and that may not be immediately updated in the README.
+A small, procedural programming language that compiles to x86-64 assembly. Compatible with Linux only. Possibly partially compatible with MacOS but that is untested and I don't plan on supporting it. When not using libc the language produces static executables and has no runtime. The language is very much in development. Nothing is stable the semantics and syntax may change and that may not be immediately updated in the README. 
 
 ## Language Features
 Rover supports, or plans to support, a simple set of features similiar to a C.
@@ -27,7 +27,17 @@ Planned features include:
 I have no intention of adding optimizations to the compiler or to make the compiler capable of spotting most errors in the code. Type checking may be implemented but deeper semantic analysis likely will not.
 
 ## Feature Referance
-Shows an example of the different language features. Will not be updated until language is more matute.
+
+### A basic Hello, World!
+```rust
+fn main() {
+    print("Hello, World!")
+}
+```
+Since we can syscall directly on Linux the most basic hello world program in Rover is about 8kB.
+Playing around with the linker I got it down to 4kB but I am not a linker expert and one could likely get it down much smaller. The executable produced is also statically linked.
+
+**Remaining features will be undocumented until language matures.**
 
 ## How Was This Built
 I have attempted and failed to build a few languages in the past. From concatenative languages to a language
@@ -45,8 +55,6 @@ instructions below.
 
 [fasm](https://flatassembler.net/) and [odin](https://odin-lang.org) are required so install them first.
 
-**I recomend using the makefile until the build process is ironed out!**
-
 ### Makefile
 
 Edit the SOURCE_FILE variable on line 3 of the makefile to be the path to your rover file. Then...
@@ -57,39 +65,4 @@ make -s clean
 ```
 
 ### Manually
-
-To compile the compiler.
-```shell
-git clone https://github.com/Rwn-A/Rover
-
-odin build Rover/src/roverc -out:roverc
-odin build Rover/src/stdlib -build-mode:shared -out:libstd.so
-```
-
-Next create a rover file ending with `.rv`.
-```shell
-touch main.rv
-```
-
-Add the below "Hello, World!" code to the file.
-```rust
-fn main() {
-    print("Hello, World!")
-}
-```
-
-Next we need to compile our source file into fasm, create an object file with fasm and then link.
-```shell
-roverc main.rv
-
-fasm output.asm
-
-ld output.o -o my_program -lstd -dynamic-linker /lib64/ld-linux-x86-64.so.2 #add -lc if using libc
-
-export LD_LIBRARY_PATH=.:$LD_LIBRARY_PATH
-```
-
-**Note:** *As of right now building the standard library is required, it only contains a single print function for a nice hello application. As time goes on this will be refined and the build process will not be so strange. Eventually, the standard library will be a Rover file that calls into a Odin library instead of just a shared object directly in Odin.*
-
-When run you should see `Hello, World!` printed to the console.
-
+Build steps currently change so frequently. This area will be unfinished for now.
