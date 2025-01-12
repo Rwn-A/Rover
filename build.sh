@@ -7,7 +7,7 @@ cd build_artifacts
 compiled_succesfully=$?
 
 if [ $compiled_succesfully -eq 0 ]; then
-   fasm output.fasm
+   fasm output.asm
 
    ld output.o -o output -dynamic-linker /lib64/ld-linux-x86-64.so.2 -lc
 

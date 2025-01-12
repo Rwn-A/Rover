@@ -140,7 +140,7 @@ argument_to_asm :: proc(using cc: ^Codegen_Context, argument: Argument, free_tem
 }
 
 fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
-    fd, err := os.open("output.fasm", os.O_RDWR | os.O_CREATE | os.O_TRUNC, 0o777)
+    fd, err := os.open("output.asm", os.O_RDWR | os.O_CREATE | os.O_TRUNC, 0o777)
     if err != os.ERROR_NONE {
         fatal("Could not open output assembly file")
     }
