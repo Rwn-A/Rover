@@ -72,7 +72,7 @@ ir_generate_program :: proc(using ctx: ^IR_Context, ast: AST) -> (program: IR_Pr
     scope_open(&sm) //global scope
     defer scope_close(&sm)
 
-    scope_register_builtin_types(&sm)
+    scope_register_builtins(&sm)
 
     //forward declare all global symbols
     for decl_node in ast{

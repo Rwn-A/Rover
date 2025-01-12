@@ -1,11 +1,3 @@
-foreign fn puts(cstring, &int);
-foreign stdout: &int;
-foreign fn fopen(cstring, cstring) &int;
-foreign fn fprintf(&int, cstring);
-foreign fn fflush(&int);
-
 fn main() {
-   fd: &int = fopen("some_text.txt", "w")
-   fprintf(fd, "Lol, this is nuts")
-   fflush(fd)
+    print("Hello, World!")
 }

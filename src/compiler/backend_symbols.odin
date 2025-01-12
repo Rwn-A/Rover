@@ -120,7 +120,7 @@ INTEGER_INFO := Type_Info{size = 8, data = Type_Info_Integer{}}
 FLOAT_INFO := Type_Info{size = 8, data = Type_Info_Float{}}
 BOOL_INFO := Type_Info{size = 1, data = Type_Info_Bool{}}
 BYTE_INFO := Type_Info{size = 1, data = Type_Info_Byte{}}
-scope_register_builtin_types :: proc(using sm: ^Scope_Manager) {
+scope_register_builtins :: proc(using sm: ^Scope_Manager) {
     scope_register(sm,  Symbol{resolved = true, name=Token{data = "float", kind = .Identifier}, data = FLOAT_INFO})
     scope_register(sm,  Symbol{resolved = true, name=Token{data = "int", kind = .Identifier}, data = INTEGER_INFO})
     scope_register(sm,  Symbol{resolved = true, name=Token{data = "bool", kind = .Identifier}, data = BOOL_INFO})
@@ -131,6 +131,14 @@ scope_register_builtin_types :: proc(using sm: ^Scope_Manager) {
         data = Type_Info_Pointer{&BYTE_INFO},
     }
     scope_register(sm,  Symbol{resolved = true, name=Token{data = "cstring", kind = .Identifier}, data = string_info})
+
+    //will be replaced with an import to a file that has these foreign declarations 
+    //for now we will manually add them to every executable
+    print_foreign_info := Foreign_Info{
+        return_type = NULL_INFO,
+        num_args = 1,
+    }
+    scope_register(sm, Symbol{resolved = true, name=Token{data = "print", kind = .Identifier}, data=print_foreign_info})
 }
 
 create_type_info :: proc(using sm: ^Scope_Manager, ast_node: Type_Node) -> (info: Type_Info, ok: bool) {

@@ -160,6 +160,7 @@ fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
     for reg in Register{
         sa.push_back(&cc.ra.free_registers, reg)
     }
+    
     defer {
         delete(cc.ra.free_stack_positions)
         delete(cc.ra.temp_to_memory)
@@ -173,7 +174,7 @@ fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
     fmt.fprintfln(fd, "public _start")
     fmt.fprintfln(fd, "_start:")
     fmt.fprintfln(fd, "call rover_main")
-    fmt.fprintfln(fd, "mov rdi, rax")
+    fmt.fprintfln(fd, "mov rdi, 0")
     fmt.fprintfln(fd, "mov rax, 60")
     fmt.fprintfln(fd, "syscall")
 
