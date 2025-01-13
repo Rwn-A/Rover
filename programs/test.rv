@@ -1,3 +1,9 @@
 fn main() {
-    print("Hello, World!")
+    x: int = 123456
+    y: int = 124
+    bag: int = 4
+    c: cstring = "Hello, World!"
+    if x + bag == 123460 {
+        print(c)
+    }
 }

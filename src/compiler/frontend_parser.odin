@@ -61,7 +61,7 @@ Type_Node :: union {
     Pointer_Type,
 }
 
-Return_Node :: distinct Expression_Node
+Return_Node :: distinct Maybe(Expression_Node)
 Expression_Node :: union {
     Literal_Int,
     Literal_Bool,
@@ -319,14 +319,19 @@ parse_statement :: proc(using parser: ^Parser) -> (stmt: Statement, ok: bool) {
                 //of the variable declaration node
                 parser.lexer.position = uint(token.location.position + 1)
                 parser.lexer.current_file_location.col = token.location.col + 1
+                parser.lexer.current_file_location.position = int(parser.lexer.position)
                 peek = token
                 token = initial
             }
             return var_decl, true
         case .Return:
-            parser_advance(parser)
-            expr := parse_expression(parser) or_return
-            return cast(Return_Node)expr, true
+            if !line_end(token, peek) && peek.kind != .Rbrace {
+                parser_advance(parser)
+                expr := parse_expression(parser) or_return
+                return cast(Return_Node)expr, true
+            }
+            parser_advance(parser) or_return
+            return cast(Return_Node)nil, true
         case: return parse_expression(parser)
     }
 }

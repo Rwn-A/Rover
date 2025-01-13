@@ -378,7 +378,7 @@ fasm_linux_generate :: proc(sp: ^Symbol_Pool, program: IR_Program) -> bool {
         }
     }
 
-    fmt.fprintfln(fd, "section '.data' writeable")
+    if len(cc.defined_strings) > 0 do fmt.fprintfln(fd, "section '.data' writeable")
     for str, i in cc.defined_strings{
         fmt.fprintfln(fd, "str%d: db \'%s\',0", i, str)
     }

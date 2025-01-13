@@ -31,7 +31,7 @@ compile :: proc(filename: string) -> bool{
     
     ast := parser_parse(&parser, virtual.arena_allocator(&node_arena)) or_return
 
-    // fmt.printfln("%#v", ast)
+    //fmt.printfln("%#v", ast)
 
     delete(source) //ast is complete, file is no longer need
 

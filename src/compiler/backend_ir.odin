@@ -144,8 +144,13 @@ ir_generate_statement :: proc(using ctx: ^IR_Context, st: Statement) -> bool {
            
         case Expression_Node: ir_generate_expression(ctx, stmt_node) or_return
         case Return_Node:
-            arg_1 := ir_generate_expression(ctx, Expression_Node(stmt_node)) or_return
-            program_append(ctx, .Ret, arg_1)
+            if expr, has_expr := stmt_node.?; has_expr {
+                arg_1 := ir_generate_expression(ctx, Expression_Node(expr)) or_return
+                program_append(ctx, .Ret, arg_1)
+            }else{
+                program_append(ctx, .Ret)
+            }
+            
         case If_Node:
             scope_open(&sm)
             defer scope_close(&sm)
