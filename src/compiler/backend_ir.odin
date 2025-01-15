@@ -47,11 +47,21 @@ Opcode :: enum {
     Gt,
     Le,
     Ge,
+    EqF,
+    NqF,
+    LtF,
+    GtF,
+    LeF,
+    GeF,
     Label,
     Add,
     Sub,
     Mul,
     Div,
+    AddF,
+    SubF,
+    MulF,
+    DivF,
     Arg,
     Function, //definition, not a call, basically a label with some meta-data
 }
@@ -285,6 +295,22 @@ ir_build_expression :: proc(using builder: ^IR_Builder, expr: Expression_Node) -
                 defer ir_release_temporary(builder, arg_1)
                 defer ir_release_temporary(builder, arg_2)
                 result := ir_use_temporary(builder)
+                if _, is_float := type_1.data.(Type_Info_Float); is_float{
+                    #partial switch expr_node.operator.kind {
+                        case .Plus: program_append(builder, .AddF, arg_1, arg_2, result)
+                        case .Dash: program_append(builder, .SubF, arg_1, arg_2, result)
+                        case .Asterisk: program_append(builder, .MulF, arg_1, arg_2, result)
+                        case .SlashForward: program_append(builder, .DivF, arg_1, arg_2, result)
+                        case .DoubleEqual: program_append(builder, .EqF, arg_1, arg_2, result)
+                        case .LessThan: program_append(builder, .LtF, arg_1, arg_2, result)
+                        case .LessThanEqual: program_append(builder, .LeF, arg_1, arg_2, result)
+                        case .NotEqual: program_append(builder, .NqF, arg_1, arg_2, result)
+                        case .GreaterThan: program_append(builder, .GtF, arg_1, arg_2, result)
+                        case .GreaterThanEqual: program_append(builder, .GeF, arg_1, arg_2, result)
+                        case: unimplemented()
+                    }
+                    return result, type_1, true
+                }
                 #partial switch expr_node.operator.kind {
                     case .Plus: program_append(builder, .Add, arg_1, arg_2, result)
                     case .Dash: program_append(builder, .Sub, arg_1, arg_2, result)

@@ -33,7 +33,7 @@ compile :: proc(filename: string) -> bool{
 
     //fmt.printfln("%#v", ast)
 
-    delete(source) //ast is complete, file is no longer need
+    delete(source) //ast is complete, file is no longer needed
 
     ir_arena := virtual.Arena{}
     if err := virtual.arena_init_growing(&ir_arena); err != .None{

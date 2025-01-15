@@ -148,9 +148,12 @@ x86_64_linux_fasm :: proc(sp: ^Symbol_Pool, program: IR_Program) {
             case .Ret: write_return(&cc, inst.arg_1)
             case .Call: write_call(&cc, inst)
             case .Sub, .Add: write_sum(&cc, inst)
+            case .SubF, .AddF: write_sum_float(&cc, inst)
             case .Mul: write_mul(&cc, inst)
             case .Div: write_div(&cc, inst)
+            case .DivF, .MulF: write_prod_float(&cc, inst)
             case .Eq, .Lt, .Nq, .Le, .Gt, .Ge: write_comparison(&cc, inst)
+            case .EqF, .LtF, .NqF, .LeF, .GtF, .GeF: write_comparison_float(&cc, inst)
             case .Jz: write_jz(&cc, inst)
             case .Jmp: fmt.fprintfln(fd, "jmp %s", label_str(&cc, inst.arg_1))
             case .Label: fmt.fprintfln(fd, "%s:", label_str(&cc, inst.arg_1))
@@ -255,6 +258,9 @@ write_store :: proc(using cc: ^Codegen_Context, inst: Instruction) {
         }else{
             value_operand = register_string(location.(Register), size)
         }
+    }else if _, is_float := inst.arg_2.(Immediate).(f64); is_float {
+        fmt.fprintfln(fd, "movq rax, xmm2")
+        value_operand = "rax"
     }
 
     #partial switch arg in inst.arg_1{
@@ -297,12 +303,14 @@ write_sum :: proc(using cc: ^Codegen_Context, inst: Instruction) {
     }
 }
 
+@(private="file")
 write_mul :: proc(using cc: ^Codegen_Context, inst: Instruction) {
     result_location := temp_require_register(cc, inst.result.?)
     fmt.fprintfln(fd, "mov rax, %s", arg_str(cc, inst.arg_1, true))
     fmt.fprintfln(fd, "imul %s, rax, %s", result_location, arg_str(cc, inst.arg_2, true))
 }
 
+@(private="file")
 write_div :: proc(using cc: ^Codegen_Context, inst: Instruction) {
     result_location, _ := save_temporary(cc, inst.result.?)
     
@@ -331,7 +339,7 @@ write_div :: proc(using cc: ^Codegen_Context, inst: Instruction) {
     fmt.fprintfln(fd, "mov %s, rax", result_location)
 }
         
-
+@(private="file")
 write_comparison :: proc(using cc: ^Codegen_Context, inst: Instruction) {
     result_location := temp_require_register(cc, inst.result.?)
     fmt.fprintfln(fd, "mov %s, %s", result_location, arg_str(cc, inst.arg_1, true))
@@ -343,6 +351,24 @@ write_comparison :: proc(using cc: ^Codegen_Context, inst: Instruction) {
         case .Gt: fmt.fprintfln(fd, "setg %s", register_8_bit(result_location))
         case .Le: fmt.fprintfln(fd, "setle %s", register_8_bit(result_location))
         case .Ge: fmt.fprintfln(fd, "setge %s", register_8_bit(result_location))
+        case: panic("unreachable")
+    }
+    fmt.fprintfln(fd, "movzx %s, %s", result_location, register_8_bit(result_location))
+}
+
+@(private="file")
+write_comparison_float :: proc(using cc: ^Codegen_Context, inst: Instruction) {
+    result_location := temp_require_register(cc, inst.result.?)
+    fmt.fprintfln(fd, "movq xmm0, %s", arg_str(cc, inst.arg_1, true))
+    fmt.fprintfln(fd, "movq xmm1, %s", arg_str(cc, inst.arg_2, true))
+    fmt.fprintfln(fd, "ucomisd xmm0, xmm1")
+    #partial switch inst.opcode{
+        case .EqF: fmt.fprintfln(fd, "sete %s", register_8_bit(result_location))
+        case .NqF: fmt.fprintfln(fd, "setne %s", register_8_bit(result_location))
+        case .LtF: fmt.fprintfln(fd, "setnae %s", register_8_bit(result_location))
+        case .GtF: fmt.fprintfln(fd, "setnbe %s", register_8_bit(result_location))
+        case .LeF: fmt.fprintfln(fd, "setna %s", register_8_bit(result_location))
+        case .GeF: fmt.fprintfln(fd, "setnb %s", register_8_bit(result_location))
         case: panic("unreachable")
     }
     fmt.fprintfln(fd, "movzx %s, %s", result_location, register_8_bit(result_location))
@@ -421,6 +447,26 @@ write_call :: proc(using cc: ^Codegen_Context, inst: Instruction) {
 }
 
 @(private="file")
+write_sum_float :: proc(using cc: ^Codegen_Context, inst: Instruction) {
+    _, _ = save_temporary(cc, inst.result.?)
+    instruction := "addsd" if inst.opcode == .AddF else "subsd"
+    fmt.fprintfln(fd, "movq xmm0, %s", arg_str(cc, inst.arg_1, true))
+    fmt.fprintfln(fd, "movq xmm1, %s", arg_str(cc, inst.arg_2, true))
+    fmt.fprintfln(fd, "%s xmm0, xmm1", instruction)
+    fmt.fprintfln(fd, "movq %s, xmm1", temporary_str(cc, inst.result.?))
+}
+
+@(private="file")
+write_prod_float :: proc(using cc: ^Codegen_Context, inst: Instruction) {
+    _, _ = save_temporary(cc, inst.result.?)
+    instruction := "mulsd" if inst.opcode == .AddF else "divsd"
+    fmt.fprintfln(fd, "movq xmm0, %s", arg_str(cc, inst.arg_1, true))
+    fmt.fprintfln(fd, "movq xmm1, %s", arg_str(cc, inst.arg_2, true))
+    fmt.fprintfln(fd, "%s xmm0, xmm1", instruction)
+    fmt.fprintfln(fd, "movq %s, xmm0", temporary_str(cc, inst.result.?) )
+}
+
+@(private="file")
 label_str :: proc(using cc: ^Codegen_Context, arg: Argument) -> string{
     return fmt.aprintf(".rover_label_%d", arg.(Label), allocator = context.temp_allocator)
 }
@@ -441,7 +487,10 @@ immediate_str :: proc(using cc: ^Codegen_Context, arg: Argument) -> string{
     switch value in arg.(Immediate){
         case byte: return fmt.aprintf("%d", value, allocator = context.temp_allocator)
         case i64: return fmt.aprintf("%d", value, allocator = context.temp_allocator)
-        case f64: return fmt.aprintf("%d",  value, allocator = context.temp_allocator)
+        case f64:
+            fmt.fprintfln(fd, "mov rax, %f", value)
+            fmt.fprintfln(fd, "movq xmm2, rax")
+            return fmt.aprintf("xmm2", allocator = context.temp_allocator)
         case string:
             append(&cc.defined_strings, value)
             return fmt.aprintf("str%d", last_idx(cc.defined_strings),allocator =  context.temp_allocator)

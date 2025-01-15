@@ -1,3 +1,7 @@
 fn main() {
-    x: byte = 10
+    x: float = 10.0
+    y: float = 2.0
+    if x / y < 5.1{
+        print("Excellent")
+    }
 }
