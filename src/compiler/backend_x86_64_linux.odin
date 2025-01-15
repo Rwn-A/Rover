@@ -403,11 +403,23 @@ write_call :: proc(using cc: ^Codegen_Context, inst: Instruction) {
     write_foreign_call :: proc(using cc: ^Codegen_Context, inst: Instruction, symbol: Symbol) {
         info := symbol.data.(Foreign_Info)
 
-        for i in 0..<info.num_args{
-            if Register(i) < Register.r9{
-                fmt.fprintfln(fd, "pop %s", Register(i+1)) //+1 skips rax
+        register_idx := 1
+        float_idx := 0
+        for arg_type, i in info.arg_types{
+            if _, is_float := arg_type.data.(Type_Info_Float); is_float{
+                if float_idx == 8{
+                    error("Warning: Foreign functions with stack passed paramaters are untested", symbol.name.location)
+                }else{
+                    fmt.fprintfln(fd, "pop rax")
+                    fmt.fprintfln(fd, "movq xmm%d, rax", float_idx)
+                    float_idx += 1
+                }
+            }
+            else if Register(register_idx) < Register.r9{
+                fmt.fprintfln(fd, "pop %s", Register(register_idx)) //+1 skips rax
+                register_idx += 1
             }else{
-                error("Warning: Foreign functions with over 6 paramaters are untested", symbol.name.location)
+                error("Warning: Foreign functions with stack passed paramaters are untested", symbol.name.location)
             }
         }
 
@@ -415,7 +427,11 @@ write_call :: proc(using cc: ^Codegen_Context, inst: Instruction) {
         fmt.fprintfln(fd, "mov rbx, rsp")
 
         if !info.builtin {
-            fmt.fprintfln(fd, "xor rax, rax")
+            if float_idx != 0 {
+                fmt.fprintfln(fd, "mov rax, %d", float_idx)
+            }else{
+                fmt.fprintfln(fd, "xor rax, rax")
+            }
             fmt.fprintfln(fd, "and rsp, 0xFFFFFFFFFFFFFFF0")
         }
 
@@ -435,14 +451,21 @@ write_call :: proc(using cc: ^Codegen_Context, inst: Instruction) {
     }
 
     symbol := pool_get(cc.sp, inst.arg_1.(Symbol_ID))
-    if _, is_rover_func := symbol.data.(Function_Info); !is_rover_func{
+    return_register: string = "rax"
+    return_move: string = "mov"
+    if info, is_foreign_func := symbol.data.(Foreign_Info); is_foreign_func{
         write_foreign_call(cc, inst, symbol)
+        if _, is_float := info.return_type.data.(Type_Info_Float); is_float {
+            return_register = "xmm0"
+            return_move = "movq"
+        }
+        
     }else{
         fmt.fprintfln(fd, "call rover_%s", ident(symbol.name))
     }
     if return_value, does_return := inst.result.?; does_return {
         save_temporary(cc, return_value)
-        fmt.fprintfln(fd, "mov %s, rax", arg_str(cc, return_value, false))
+        fmt.fprintfln(fd, "%s %s, %s",return_move,  arg_str(cc, return_value, false), return_register)
     }
 }
 
@@ -459,7 +482,7 @@ write_sum_float :: proc(using cc: ^Codegen_Context, inst: Instruction) {
 @(private="file")
 write_prod_float :: proc(using cc: ^Codegen_Context, inst: Instruction) {
     _, _ = save_temporary(cc, inst.result.?)
-    instruction := "mulsd" if inst.opcode == .AddF else "divsd"
+    instruction := "mulsd" if inst.opcode == .MulF else "divsd"
     fmt.fprintfln(fd, "movq xmm0, %s", arg_str(cc, inst.arg_1, true))
     fmt.fprintfln(fd, "movq xmm1, %s", arg_str(cc, inst.arg_2, true))
     fmt.fprintfln(fd, "%s xmm0, xmm1", instruction)

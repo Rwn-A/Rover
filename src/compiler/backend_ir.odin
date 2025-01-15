@@ -396,7 +396,13 @@ ir_lvalue :: proc(using builder: ^IR_Builder, expr: Expression_Node) -> (res: Ar
         case Identifier_Node:
             symbol_id := scope_find(&builder.sm, Token(expr_node)) or_return
             symbol := pool_get(sm.pool, symbol_id)
-            return symbol_id, symbol.data.(Local_Info).type, true
+            type_info: Type_Info
+            if local, is_local := symbol.data.(Local_Info); is_local{
+                type_info = local.type
+            }else{
+                type_info = Type_Info(symbol.data.(Foreign_Global_Info))
+            }
+            return symbol_id, type_info, true
         case ^Unary_Expression_Node:
             if expr_node.operator.kind != .Hat{
                 error("Expected a dereferance operator got %s", expr_node.operator.location, expr_node.operator.kind)

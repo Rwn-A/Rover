@@ -39,7 +39,7 @@ Function_Info :: struct {
 
 Foreign_Info :: struct {
     return_type: Type_Info,
-    num_args: int,
+    arg_types: []Type_Info,
     builtin: bool,
 }
 
@@ -133,7 +133,7 @@ scope_register_builtins :: proc(using sm: ^Scope_Manager) {
     //for now we will manually add them to every executable
     print_foreign_info := Foreign_Info{
         return_type = NULL_INFO,
-        num_args = 1,
+        arg_types = {CSTRING_INFO},
         builtin = true,
     }
     scope_register(sm, Symbol{resolved = true, name=Token{data = "print", kind = .Identifier}, data=print_foreign_info})
@@ -186,8 +186,13 @@ scope_register_global_declaration :: proc(using sm: ^Scope_Manager, decl_node: D
             }else{
                 data.return_type = create_type_info(sm, decl.return_type.?) or_return
             }
-            data.num_args = len(decl.param_types)
 
+            arg_builder := make([dynamic]Type_Info)
+            for ast_type in decl.param_types{
+                append(&arg_builder, create_type_info(sm, ast_type) or_return)
+            }
+            data.arg_types = arg_builder[:]
+            
             symbol := &pool[scope_find(sm, decl.name) or_return] 
             symbol.resolved = true
             symbol.data = data

@@ -6,7 +6,7 @@ Rover supports, or plans to support, a simple set of features similiar to a C.
 
 Currently supported features include:
 - Functions
-- Local Variables (Signed 64-bit integers and C-style strings only right now)
+- Local Variables Signed 64 bit, C-style strings, floats, byte
 - Control Flow (If statements and while statements)
 - Basic arithmetic (+, -, *, /)
 - Pointers
@@ -15,7 +15,6 @@ Currently supported features include:
 _*FFI is not completely implemented, Rover types do not always align with C types and a certain amount of C functions that have lots of parameters or paramaters of certain types will not be called correctly._ 
 
 Planned features include:
-- Support for floating point numbers and single byte values
 - Structures, Arrays and Slices
 - Importing other source files
 - More robust FFI, (Not aiming for complete compatibility with C but good for most functions)
