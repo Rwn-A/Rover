@@ -9,8 +9,6 @@ Declaration_Node :: union {
     Function_Node,
     Foreign_Function_Node,
     Foreign_Global_Node,
-    //Variable_Node, (global vars / constants)
-    //Struct_Node
 }
 
 Statement :: union {
@@ -108,29 +106,6 @@ parser_init :: proc(parser: ^Parser, lexer: ^Lexer) -> bool {
     return true
 }
 
-//TODO confirm that the context does carry down to the other parse functions
-parser_parse :: proc(using parser: ^Parser, node_allocator: mem.Allocator) -> (ast: AST, ok: bool) {
-    context.allocator = node_allocator
-
-    ast_builder := make([dynamic]Declaration_Node)
-    for token.kind != .EOF{
-        #partial switch token.kind {
-            case .Fn: append(&ast_builder, parse_function_node(parser) or_return)
-            case .Foreign:
-                if peek.kind == .Fn{
-                    append(&ast_builder, parse_foreign_function(parser) or_return)
-                }else{
-                    append(&ast_builder, parse_foreign_global(parser) or_return)
-                }
-            case: 
-                error("Top-Level statement cannot begin with %v", token.location, token.kind)
-                return nil, false
-        }
-    }
-
-    return ast_builder[:], true
-}
-
 @(private="file")
 parser_advance :: proc(using parser: ^Parser) -> (ok: bool) {
     token = peek
@@ -162,44 +137,57 @@ parser_assert_identifier :: proc(using parser: ^Parser) -> (tk: Token, ok: bool)
     return initial, true
 }
 
+parser_parse :: proc(using parser: ^Parser, node_allocator: mem.Allocator) -> (ast: AST, ok: bool) {
+    context.allocator = node_allocator
+
+    ast_builder := make([dynamic]Declaration_Node)
+    for token.kind != .EOF{
+        #partial switch token.kind {
+            case .Fn: append(&ast_builder, parse_function_node(parser) or_return)
+            case .Foreign:
+                if peek.kind == .Fn do append(&ast_builder, parse_foreign_function(parser) or_return)
+                else do append(&ast_builder, parse_foreign_global(parser) or_return)
+            case: 
+                error("Top-Level statement cannot begin with %v", token.location, token.kind)
+                return nil, false
+        }
+    }
+    return ast_builder[:], true
+}
+
 @(private="file")
 parse_foreign_function :: proc(using parser: ^Parser) -> (node: Foreign_Function_Node, ok: bool) {
-    parser_advance(parser) or_return //consume foreign
-    parser_advance(parser) or_return  //consume fn
+    parser_assert(parser, .Foreign, .Fn) or_return
     node.name = parser_assert_identifier(parser) or_return
-    parser_assert(parser, .Lparen)
+    parser_assert(parser, .Lparen) or_return
     
     param_builder := make([dynamic]Type_Node)
     for token.kind != .Rparen {
         append(&param_builder, parse_type(parser) or_return)
         if token.kind == .Comma do parser_advance(parser) or_return
     }
-    parser_advance(parser) or_return
-
     node.param_types = param_builder[:]
 
-    if token.kind != .SemiColon do node.return_type = parse_type(parser) or_return
-
-    parser_assert(parser, .SemiColon) or_return
+    rparen_token := token
+    parser_assert(parser, .Rparen) or_return
+    if !line_end(rparen_token, token) do node.return_type = parse_type(parser) or_return
 
     return node, true
 }
 
 @(private="file")
 parse_foreign_global :: proc(using parser: ^Parser) -> (node: Foreign_Global_Node, ok: bool) {
-    parser_advance(parser) or_return //consume foreign
+    parser_advance(parser) or_return 
     node.name = parser_assert_identifier(parser) or_return
     parser_assert(parser, .Colon) or_return
     node.type = parse_type(parser) or_return
-    parser_assert(parser, .SemiColon) or_return
     return node, true
 }
 
 @(private="file")
 parse_function_node :: proc(using parser: ^Parser) -> (node: Function_Node, ok: bool) {
-    parser_advance(parser) or_return //consumes fn token
+    parser_advance(parser) or_return
     node.name = parser_assert_identifier(parser) or_return
-
     parser_assert(parser, .Lparen) or_return
 
     param_builder := make([dynamic]Variable_Node)
@@ -216,16 +204,11 @@ parse_function_node :: proc(using parser: ^Parser) -> (node: Function_Node, ok: 
     parser_assert(parser, .Rparen) or_return
     node.params = param_builder[:]
 
-    if token.kind != .Lbrace{
-        node.return_type = parse_type(parser) or_return
-    }
+    if token.kind != .Lbrace do node.return_type = parse_type(parser) or_return
     parser_assert(parser, .Lbrace) or_return
-
-    //body builder lol
+    
     body_builder := make([dynamic]Statement)
-    for token.kind != .Rbrace{
-        append(&body_builder, parse_statement(parser) or_return)
-    }
+    for token.kind != .Rbrace do append(&body_builder, parse_statement(parser) or_return)
     parser_assert(parser, .Rbrace)
     node.body = body_builder[:]
 
@@ -250,62 +233,30 @@ parse_type :: proc(using parser: ^Parser) -> (type: Type_Node, ok:bool) {
     }
 }
 
-//used for structs
-@(private="file")
-parse_name_type_pairs :: proc(using parser: ^Parser) -> (names: []Token, types: []Type_Node, ok: bool) {
-    //these are allocated with the ast allocator and should not be deleted
-    name_builder := make([dynamic]Token)
-    type_builder := make([dynamic]Type_Node)
-    for {
-        name := parser_assert_identifier(parser) or_return
-        parser_assert(parser, .Colon) or_return
-        type := parse_type(parser) or_return 
-        append(&name_builder, name)
-        append(&type_builder, type)
-        if token.kind == .Comma {
-            parser_advance(parser) or_return
-            continue
-        }else{
-            break
-        }
-    }
-    return name_builder[:], type_builder[:], true
-}
-
 @(private="file")
 parse_statement :: proc(using parser: ^Parser) -> (stmt: Statement, ok: bool) {
     initial := token
     #partial switch initial.kind {
-        case .If:
+        case .While, .If:
             parser_advance(parser) or_return
-            comparision := parse_primary_expression(parser, .Lowest) or_return
+
+            condition := parse_primary_expression(parser, .Lowest) or_return
             parser_advance(parser) or_return
             parser_assert(parser, .Lbrace) or_return
+
             body_builder := make([dynamic]Statement)
-            for token.kind != .Rbrace{
-                append(&body_builder, parse_statement(parser) or_return)
-            }
+            for token.kind != .Rbrace do append(&body_builder, parse_statement(parser) or_return)
             parser_assert(parser, .Rbrace) or_return
-            if token.kind != .Else do return If_Node{comparison = comparision, body = body_builder[:]}, true
+
+            if initial.kind == .While do return While_Node{condition = condition, body = body_builder[:]}, true
+            if token.kind != .Else do return If_Node{comparison = condition, body = body_builder[:]}, true
+            
             parser_advance(parser) or_return
             parser_assert(parser, .Lbrace) or_return
             else_builder := make([dynamic]Statement)
-            for token.kind != .Rbrace{
-                append(&else_builder, parse_statement(parser) or_return)
-            }
+            for token.kind != .Rbrace do append(&else_builder, parse_statement(parser) or_return)
             parser_assert(parser, .Rbrace) or_return
-            return If_Node{comparison = comparision, body = body_builder[:], else_body = else_builder[:]}, true
-        case .While:
-            parser_advance(parser) or_return
-            comparision := parse_primary_expression(parser, .Lowest) or_return
-            parser_advance(parser) or_return
-            parser_assert(parser, .Lbrace) or_return
-            body_builder := make([dynamic]Statement)
-            for token.kind != .Rbrace{
-                append(&body_builder, parse_statement(parser) or_return)
-            }
-            parser_assert(parser, .Rbrace) or_return
-            return While_Node{condition = comparision, body = body_builder[:]}, true
+            return If_Node{comparison = condition, body = body_builder[:], else_body = else_builder[:]}, true
         case .Identifier:
             if peek.kind != .Colon do return parse_expression(parser)
             parser_advance(parser) or_return //skip name
@@ -314,9 +265,7 @@ parse_statement :: proc(using parser: ^Parser) -> (stmt: Statement, ok: bool) {
             var_decl.name = initial
             var_decl.type = parse_type(parser) or_return
             if token.kind == .Equal{
-                //this tricks the parser into seeing the next thing as an assignment expression
-                //I wouldnt say im happy with this but i didnt want the assignment to be part
-                //of the variable declaration node
+                //trick the lexer to re-parse only the assignment portion
                 parser.lexer.position = uint(token.location.position + 1)
                 parser.lexer.current_file_location.col = token.location.col + 1
                 parser.lexer.current_file_location.position = int(parser.lexer.position)
@@ -326,7 +275,7 @@ parse_statement :: proc(using parser: ^Parser) -> (stmt: Statement, ok: bool) {
             return var_decl, true
         case .Return:
             if !line_end(token, peek) && peek.kind != .Rbrace {
-                parser_advance(parser)
+                parser_advance(parser) or_return
                 expr := parse_expression(parser) or_return
                 return cast(Return_Node)expr, true
             }

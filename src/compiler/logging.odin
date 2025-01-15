@@ -19,11 +19,11 @@ error :: proc(fmt_str: string, source_loc: File_Location, args: ..any) {
 dump_ir :: proc(ir: IR_Program) {
     print_argument :: proc(arg: Argument) {
         switch arg_val in arg{
-            case i64: fmt.printf("%v ", arg_val)
+            case Immediate: fmt.printf("%v ", arg_val)
             case Symbol_ID: fmt.printf("S%v ", arg_val)
             case Temporary: fmt.printf("T%v ", arg_val)
-            case string: fmt.printf("\"%s\"", arg_val)
-            case: fmt.printf("-- ")
+            case Label: fmt.printf("L%v ", arg_val)
+            case: fmt.printf("---")
         }
     }
     for inst in ir{

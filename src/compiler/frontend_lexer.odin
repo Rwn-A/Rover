@@ -98,7 +98,6 @@ lexer_next :: proc(using lexer: ^Lexer) -> (token:Token, ok: bool) {
 
     if eof do return current_token, true
 
-
     switch lexer_char(lexer) {
         case '.': current_token.kind = .Dot
         case ',': current_token.kind = .Comma
@@ -212,7 +211,6 @@ lexer_lex_number :: proc(using lexer: ^Lexer) -> (TokenKind, TokenData) {
         error("Could not generate number from %s", current_file_location, text)
     }
     
-
     return .Integer, i64(value)
 }
 
@@ -229,7 +227,6 @@ lexer_lex_string :: proc(using lexer: ^Lexer) -> TokenData {
     lexer_adv(lexer)
 
     text := transmute(string)source[start_position:position]
-
     text = strings.clone(text, identifier_allocator)
 
     return text

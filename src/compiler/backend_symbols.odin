@@ -14,6 +14,7 @@ Symbol_ID :: distinct int
 Scope_Manager :: struct{
     scopes: sa.Small_Array(MAX_BLOCK_DEPTH, Symbol_Table),
     symbol_allocator: mem.Allocator, //some symbols require allocations, nested types primarily
+    current_function: ^Symbol,
     pool: ^Symbol_Pool,
 }
 
@@ -34,7 +35,6 @@ Function_Info :: struct {
     param_ids: []Symbol_ID,
     return_type: Type_Info,
     locals_size: int,
-    size_of_first_local: int, //when accessing locals it will be rbp - (offset + size_of_first_local)
 }
 
 Foreign_Info :: struct {
@@ -121,17 +121,13 @@ INTEGER_INFO := Type_Info{size = 8, data = Type_Info_Integer{}}
 FLOAT_INFO := Type_Info{size = 8, data = Type_Info_Float{}}
 BOOL_INFO := Type_Info{size = 1, data = Type_Info_Bool{}}
 BYTE_INFO := Type_Info{size = 1, data = Type_Info_Byte{}}
+CSTRING_INFO := Type_Info{size = 8, data = Type_Info_Pointer{pointing_at = &BYTE_INFO}}
 scope_register_builtins :: proc(using sm: ^Scope_Manager) {
     scope_register(sm,  Symbol{resolved = true, name=Token{data = "float", kind = .Identifier}, data = FLOAT_INFO})
     scope_register(sm,  Symbol{resolved = true, name=Token{data = "int", kind = .Identifier}, data = INTEGER_INFO})
     scope_register(sm,  Symbol{resolved = true, name=Token{data = "bool", kind = .Identifier}, data = BOOL_INFO})
     scope_register(sm,  Symbol{resolved = true, name=Token{data = "byte", kind = .Identifier}, data = BYTE_INFO})
-    
-    string_info := Type_Info{
-        size = 8,
-        data = Type_Info_Pointer{&BYTE_INFO},
-    }
-    scope_register(sm,  Symbol{resolved = true, name=Token{data = "cstring", kind = .Identifier}, data = string_info})
+    scope_register(sm,  Symbol{resolved = true, name=Token{data = "cstring", kind = .Identifier}, data = CSTRING_INFO})
 
     //will be replaced with an import to a file that has these foreign declarations 
     //for now we will manually add them to every executable
@@ -209,13 +205,13 @@ scope_register_global_declaration :: proc(using sm: ^Scope_Manager, decl_node: D
     panic("unreachable")
 }
 
-scope_register_variable :: proc(using sm: ^Scope_Manager, decl: Variable_Node, function_size: ^int, constant := false) -> bool {
+scope_register_variable :: proc(using sm: ^Scope_Manager, decl: Variable_Node, constant := false) -> bool {
+    type := create_type_info(sm, decl.type) or_return
+    current_fn_info := &current_function.data.(Function_Info)
     symbol := Symbol{resolved = true, name = decl.name, data = Local_Info{
-        address = function_size^,
-        type = create_type_info(sm, decl.type) or_return,
-        constant = constant,
+        address = current_fn_info.locals_size + type.size, type = type, constant = constant,
     }}
-    function_size^ += symbol.data.(Local_Info).type.size
     scope_register(sm, symbol) or_return
+    current_fn_info.locals_size += type.size
     return true
 }

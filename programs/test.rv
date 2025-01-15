@@ -1,9 +1,10 @@
 fn main() {
-    x: int = 123456
-    y: int = 124
-    bag: int = 4
-    c: cstring = "Hello, World!"
-    if x + bag == 123460 {
-        print(c)
+    x: int = 20
+    if x * 2 == 40 {
+        print("done")
+        if x / 2 == 10 {
+            print("great")
+        }
     }
 }
+

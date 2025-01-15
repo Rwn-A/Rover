@@ -43,14 +43,16 @@ compile :: proc(filename: string) -> bool{
     ir_allocator := virtual.arena_allocator(&ir_arena)
 
     symbol_pool := make(Symbol_Pool, ir_allocator)
-    ir_context := IR_Context{}
+    ir_context := IR_Builder{}
     ir_init(&ir_context, &symbol_pool, ir_allocator)
 
-    program := ir_generate_program(&ir_context, ast) or_return
+    program := ir_build_program(&ir_context, ast) or_return
+
+    dump_ir(program)
 
     virtual.arena_destroy(&node_arena)
 
-    fasm_linux_generate(&symbol_pool, program) or_return
+    x86_64_linux_fasm(&symbol_pool, program)
 
     return true
 }
