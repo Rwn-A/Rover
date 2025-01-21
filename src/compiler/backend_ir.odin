@@ -40,6 +40,7 @@ Opcode :: enum {
     Ret,
     Jmp,
     Addr_Of,
+    Add_Keep, //adds values but keep operands alive after add currently used for keeping track of offsets
     Jz,
     Eq,
     Nq,
@@ -256,7 +257,7 @@ ir_build_return :: proc(using builder: ^IR_Builder, return_node: Return_Node) ->
 }
 
 @(private="file")
-ir_build_expression :: proc(using builder: ^IR_Builder, expr: Expression_Node) -> (arg: Argument, type: Type_Info, ok: bool) {
+ir_build_expression :: proc(using builder: ^IR_Builder, expr: Expression_Node, store_ctx: Store_Context = {}) -> (arg: Argument, type: Type_Info, ok: bool) {
        #partial switch expr_node in expr{
         case Literal_Int: return Immediate(expr_node.data.(i64)), INTEGER_INFO, true
         case Literal_String: return Immediate(expr_node.data.(string)), CSTRING_INFO, true
@@ -280,9 +281,26 @@ ir_build_expression :: proc(using builder: ^IR_Builder, expr: Expression_Node) -
         case ^Binary_Expression_Node: 
             if expr_node.operator.kind == .Equal{
                arg_1, type := ir_lvalue(builder, expr_node.lhs) or_return
+               if arr_info, is_arr := type.data.(Type_Info_Array); is_arr{
+                address: Temporary = 0
+                defer ir_release_temporary(builder, address)
+                if sym, is_sym := arg_1.(Symbol_ID); is_sym{
+                    address = ir_use_temporary(builder)
+                    program_append(builder, .Addr_Of, sym, nil, address)
+                }else{
+                    address = arg_1.(Temporary)
+                }
+                store_context := Store_Context{
+                    cb = Store_Array_Callback,
+                    address = address,
+                    type_info = type
+                }
+                _, _ = ir_build_expression(builder, expr_node.rhs, store_context) or_return
+                return nil, NULL_INFO, true
+               }
                arg_2, value_type := ir_build_expression(builder, expr_node.rhs) or_return
-               defer ir_release_temporary(builder, arg_2)
                defer ir_release_temporary(builder, arg_1)
+               defer ir_release_temporary(builder, arg_2)
                switch type.size{
                     case WORD_SIZE: program_append(builder, .StoreW, arg_1, arg_2)
                     case BYTE_SIZE: program_append(builder, .StoreB, arg_1, arg_2)
@@ -385,8 +403,13 @@ ir_build_expression :: proc(using builder: ^IR_Builder, expr: Expression_Node) -
             program_append(builder, .Call, callee, nil, result)
             if res, ok := result.?; ok do return res, return_type, true
             return nil, return_type, true
-
-        case: unimplemented()
+        case Array_Literal_Node:
+            for element in expr_node.entries{
+                result, _ := ir_build_expression(builder, element, store_ctx) or_return
+                store_ctx.cb(builder, store_ctx, result)
+            }
+            return nil, store_ctx.type_info, true
+        case: panic("Unimplemented")
     }
 }
 
@@ -415,3 +438,20 @@ ir_lvalue :: proc(using builder: ^IR_Builder, expr: Expression_Node) -> (res: Ar
         case: unimplemented()
     }
 }
+
+Store_Context :: struct {
+    type_info: Type_Info,
+    address: Temporary,
+    cb: Store_CB,
+}
+
+Store_CB :: proc(using builder: ^IR_Builder, store_ctx: Store_Context, arg: Argument)
+
+Store_Array_Callback :: proc(using builder: ^IR_Builder, store_ctx: Store_Context, arg: Argument) {
+    defer ir_release_temporary(builder, arg)
+    arr_info := store_ctx.type_info.data.(Type_Info_Array)
+    inst: Opcode = .StoreW if arr_info.element_type.size == 8 else .StoreB
+    program_append(builder, inst, store_ctx.address, arg, nil)
+    program_append(builder, .Add_Keep, store_ctx.address, Immediate(i64(arr_info.element_type.size)), store_ctx.address)
+}
+

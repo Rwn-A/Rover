@@ -54,9 +54,14 @@ Symbol_Type :: Token
 Pointer_Type :: struct {
     pointing_at: ^Type_Node,
 }
+Array_Type :: struct {
+    length: int,
+    element: ^Type_Node,
+}
 Type_Node :: union {
     Symbol_Type, //types defined by a single symbol
     Pointer_Type,
+    Array_Type,
 }
 
 Return_Node :: distinct Maybe(Expression_Node)
@@ -66,6 +71,7 @@ Expression_Node :: union {
     Literal_String,
     Literal_Float,
     Identifier_Node,
+    Array_Literal_Node,
     ^Binary_Expression_Node,
     ^Unary_Expression_Node,
     Function_Call_Node,
@@ -91,6 +97,10 @@ Unary_Expression_Node :: struct {
 Function_Call_Node :: struct {
     name: Token,
     args: []Expression_Node,
+}
+
+Array_Literal_Node :: struct {
+    entries: []Expression_Node,
 }
 
 Parser :: struct {
@@ -227,6 +237,13 @@ parse_type :: proc(using parser: ^Parser) -> (type: Type_Node, ok:bool) {
             pointing_at := new(Type_Node)
             pointing_at^ = parse_type(parser) or_return
             return Pointer_Type{pointing_at = pointing_at}, true
+        case .Lbracket:
+            parser_advance(parser) or_return
+            length := token
+            parser_assert(parser, .Integer, .Rbracket) or_return
+            pointing_at := new(Type_Node)
+            pointing_at^ = parse_type(parser) or_return
+            return Array_Type{length = int(length.data.(i64)), element = pointing_at}, true
         case:
             error("Expected a type got %s", initial.location, initial.kind)
             return nil, false
@@ -342,6 +359,7 @@ parse_primary_expression :: proc(using parser: ^Parser, prec: Operator_Precedenc
         case .True,. False: expr = cast(Literal_Bool)token
         case .String: expr = cast(Literal_String)token
         case .Lparen: expr = parse_grouped(parser) or_return
+        case .Lbracket: expr = parse_array_literal(parser) or_return
         case .Hat, .ExclamationMark, .Ampersand, .Dash: expr = parse_prefix(parser) or_return
         case .Identifier:
             #partial switch peek.kind {
@@ -374,6 +392,23 @@ parse_grouped :: proc(using parser: ^Parser) -> (expr: Expression_Node, ok: bool
     }
     parser_advance(parser) or_return
     return expr, true
+}
+
+@(private="file")
+parse_array_literal :: proc(using parser: ^Parser) -> (expr: Expression_Node, ok: bool) {
+    parser_advance(parser) or_return
+    entry_builder := make([dynamic]Expression_Node)
+
+    for token.kind != .Rbracket{
+        append(&entry_builder, parse_primary_expression(parser, .Lowest) or_return)
+        parser_advance(parser) or_return
+        if token.kind == .Comma{
+            parser_advance(parser) or_return
+            continue
+        }
+    }
+
+    return Array_Literal_Node{entries = entry_builder[:]}, true
 }
 
 @(private="file")

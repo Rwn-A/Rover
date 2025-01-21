@@ -75,7 +75,7 @@ free_temporary :: proc(using cc: ^Codegen_Context, temp: Temporary) {
     _, location_union := delete_key(&temp_to_memory, temp) //this shouldnt be nessecary, but might catch a bug
 
     switch location in location_union {
-        case Register: sa.push(&free_registers, location)
+        case Register: sa.push_front(&free_registers, location)
         case Stack_Offset:
             //this implies we are the last position on the stack so far
             //best to just move the stack pointer back
@@ -147,7 +147,7 @@ x86_64_linux_fasm :: proc(sp: ^Symbol_Pool, program: IR_Program) {
             case .Addr_Of: write_addr_of(&cc, inst)
             case .Ret: write_return(&cc, inst.arg_1)
             case .Call: write_call(&cc, inst)
-            case .Sub, .Add: write_sum(&cc, inst)
+            case .Sub, .Add, .Add_Keep: write_sum(&cc, inst)
             case .SubF, .AddF: write_sum_float(&cc, inst)
             case .Mul: write_mul(&cc, inst)
             case .Div: write_div(&cc, inst)
@@ -277,7 +277,7 @@ write_store :: proc(using cc: ^Codegen_Context, inst: Instruction) {
             }
             qualifier: Asm_Size = .QWORD if size == 8 else .BYTE
             fmt.fprintfln(fd, "mov %s [%s], %s", qualifier, address_register, value_operand)
-            fmt.fprintfln(fd, "pop rbx")
+            if address_register == "rbx" do  fmt.fprintfln(fd, "pop rbx")
         case Symbol_ID:
             fmt.fprintfln(fd, "mov %s, %s", symbol_str(cc, arg), value_operand)
         case: panic("Tried to store to a non-loadable operand")
@@ -295,11 +295,12 @@ write_addr_of :: proc(using cc: ^Codegen_Context, inst: Instruction) {
 @(private="file")
 write_sum :: proc(using cc: ^Codegen_Context, inst: Instruction) {
     result_location := temp_require_register(cc, inst.result.?)
-    fmt.fprintfln(fd, "mov %s, %s", result_location, arg_str(cc, inst.arg_1, true))
+    free_operands := false if inst.opcode == .Add_Keep else true
+    fmt.fprintfln(fd, "mov %s, %s", result_location, arg_str(cc, inst.arg_1, free_operands))
     if inst.opcode == .Sub{
         fmt.fprintfln(fd, "sub %s, %s", result_location, arg_str(cc, inst.arg_2, true))
     }else{
-        fmt.fprintfln(fd, "add %s, %s", result_location, arg_str(cc, inst.arg_2, true))
+        fmt.fprintfln(fd, "add %s, %s", result_location, arg_str(cc, inst.arg_2, free_operands))
     }
 }
 

@@ -60,6 +60,7 @@ Type_Info :: struct {
         Type_Info_Bool,
         Type_Info_Byte,
         Type_Info_Pointer,
+        Type_Info_Array,
     }
 }
 
@@ -69,6 +70,7 @@ Type_Info_Null :: struct {}
 Type_Info_Bool :: struct {}
 Type_Info_Byte :: struct {}
 Type_Info_Pointer :: struct {pointing_at: ^Type_Info}
+Type_Info_Array :: struct {element_type: ^Type_Info}
 
 
 scope_open :: proc(using sm: ^Scope_Manager) {
@@ -154,6 +156,11 @@ create_type_info :: proc(using sm: ^Scope_Manager, ast_node: Type_Node) -> (info
             pointing_at := new(Type_Info, symbol_allocator)
             pointing_at^ = create_type_info(sm, ast_type.pointing_at^) or_return
             return Type_Info{data = Type_Info_Pointer{pointing_at = pointing_at}, size = 8}, true
+        case Array_Type:
+            element_type := new(Type_Info, symbol_allocator)
+            element_type^ = create_type_info(sm, ast_type.element^) or_return
+            length := ast_type.length
+            return Type_Info{data = Type_Info_Array{element_type = element_type}, size = length * element_type.size}, true
         case: panic("unreachable")
     }
 }
