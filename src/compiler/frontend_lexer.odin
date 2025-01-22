@@ -27,8 +27,6 @@ TokenKind :: enum {
     Rparen,
     Lbrace,
     Rbrace,
-    Lbracket,
-    Rbracket,
 
     If,
     Else,
@@ -109,8 +107,6 @@ lexer_next :: proc(using lexer: ^Lexer) -> (token:Token, ok: bool) {
         case ';': current_token.kind = .SemiColon
         case '(': current_token.kind = .Lparen
         case ')': current_token.kind = .Rparen
-        case '[': current_token.kind = .Lbracket
-        case ']': current_token.kind = .Rbracket
         case '{': current_token.kind = .Lbrace
         case '}': current_token.kind = .Rbrace
         case 'A'..='z': current_token.kind, current_token.data = lexer_lex_word(lexer)

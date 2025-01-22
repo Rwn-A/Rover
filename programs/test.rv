@@ -1,3 +1,13 @@
+foreign fn log(float) float
+foreign fn printf(cstring, float, float, int)
+foreign fn fflush(&int)
+foreign stdout: &int
+
 fn main() {
-   xs: [8]int = [1, 0, 0, 0, 0, 0, 0, 0]
+    x: float = 120.5
+    y: float = log(x)
+    integer: int = 12
+    printf("%f %f %d", y, x, integer)
+    fflush(stdout)
+    
 }
