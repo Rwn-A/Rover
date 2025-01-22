@@ -221,7 +221,7 @@ write_load :: proc(using cc: ^Codegen_Context, inst: Instruction) {
             if register, in_register := cc.ra.temp_to_memory[arg].(Register); in_register{
                 address_register = register
             }else{
-                fmt.printfln("mov rax, %s", temporary_str(cc, arg))
+                fmt.fprintfln(fd, "mov rax, %s", temporary_str(cc, arg))
                 address_register = .rax
             }
             qualifier: Asm_Size = .QWORD if size == 8 else .BYTE
@@ -272,7 +272,7 @@ write_store :: proc(using cc: ^Codegen_Context, inst: Instruction) {
                 address_register = register_string(register, 8)
             }else{
                 fmt.fprintfln(fd, "push rbx")
-                fmt.printfln("mov rbx, %s", temporary_str(cc, arg))
+                fmt.fprintfln(fd, "mov rbx, %s", temporary_str(cc, arg))
                 address_register = "rbx"
             }
             qualifier: Asm_Size = .QWORD if size == 8 else .BYTE
