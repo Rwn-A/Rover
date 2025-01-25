@@ -3,16 +3,16 @@ foreign fn fflush(&int)
 foreign stdout: &int
 
 fn main() {
-   xs: [500]int
+   xs: [5]int
    
    i: int = 0
-   while i < 500 {
+   while i < 5 {
       xs.(i) = i
       i = i + 1
    }
 
    i = 0
-   while i < 500 {
+   while i < 5 {
       printf("%d ", xs.(i))
       i = i + 1
    }

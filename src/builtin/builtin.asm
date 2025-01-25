@@ -1,5 +1,12 @@
 format ELF64
 
+; Builtin Functions for Rover
+;--------------------
+; Mainly a wrapper around system calls.
+; Adhere to System V calling convention not the Kernel one
+;--------------------
+
+
 section '.text' executable
 
 public print
