@@ -6,6 +6,7 @@ import "core:fmt"
 
 compile :: proc(filename: string) -> bool{
     //--compiler frontend--
+    fmt.printfln("[Info]: Opening source file %s.", filename)
     source, ok := os.read_entire_file(filename)
     if !ok {
         fatal("Failed to open file %s", filename)
@@ -28,6 +29,8 @@ compile :: proc(filename: string) -> bool{
     parser := Parser{}
     lexer_init(&lexer, source, filename, virtual.arena_allocator(&identifier_arena))
     parser_init(&parser, &lexer) or_return
+
+    fmt.printfln("[Info]: Parsing...")
     
     ast := parser_parse(&parser, virtual.arena_allocator(&node_arena)) or_return
 
@@ -46,11 +49,19 @@ compile :: proc(filename: string) -> bool{
     ir_context := IR_Builder{}
     ir_init(&ir_context, &symbol_pool, ir_allocator)
 
+    fmt.printfln("[Info]: Generating IR...")
+
     program := ir_build_program(&ir_context, ast) or_return
+
+    //dump_ir(program, &symbol_pool)
 
     virtual.arena_destroy(&node_arena)
 
+    fmt.printfln("[Info]: Generating Assembly...")
+
     x86_64_linux_fasm(&symbol_pool, program)
+
+    fmt.printfln("[Info]: Compilation Complete.")
 
     return true
 }

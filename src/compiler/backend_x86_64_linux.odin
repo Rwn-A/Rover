@@ -75,7 +75,7 @@ free_temporary :: proc(using cc: ^Codegen_Context, temp: Temporary) {
     _, location_union := delete_key(&temp_to_memory, temp) //this shouldnt be nessecary, but might catch a bug
 
     switch location in location_union {
-        case Register: sa.push(&free_registers, location)
+        case Register: sa.push_front(&free_registers, location)
         case Stack_Offset:
             //this implies we are the last position on the stack so far
             //best to just move the stack pointer back
@@ -145,6 +145,7 @@ x86_64_linux_fasm :: proc(sp: ^Symbol_Pool, program: IR_Program) {
             case .LoadW, .LoadB: write_load(&cc, inst)
             case .StoreB, .StoreW: write_store(&cc, inst)
             case .Addr_Of: write_addr_of(&cc, inst)
+            case .Offset: write_offset(&cc, inst)
             case .Ret: write_return(&cc, inst.arg_1)
             case .Call: write_call(&cc, inst)
             case .Sub, .Add: write_sum(&cc, inst)
@@ -202,10 +203,34 @@ write_function_header :: proc(using cc: ^Codegen_Context, inst: Instruction) {
     for param_id in info.param_ids{
         param := pool_get(sp, param_id)
         param_info := param.data.(Local_Info)
-        fmt.fprintfln(fd, "mov rax, [rbp + %d]", offset)
-        fmt.fprintfln(fd, "mov %s, rax", arg_str(cc, param_id))
-        offset += param_info.type.size
+        write_param_load(cc, &param_info.address, param_info.type, &offset)
     }
+}
+
+@(private="file")
+write_param_load :: proc(using cc: ^Codegen_Context, s_offset: ^int, type: Type_Info, l_offset: ^int) {
+    if is_simple_type(type) {
+        qualifer := Asm_Size(type.size)
+        register := "rax" if type.size == 8 else "al"
+        fmt.fprintfln(fd, "mov %s, %s [rbp + %d]", register, qualifer, l_offset^)
+        fmt.fprintfln(fd, "mov %s [rbp - %d], %s", qualifer, s_offset^, register)
+        l_offset^ += type.size
+        s_offset^ -= type.size
+        return
+    }
+    #partial switch info in type.data{
+        case Type_Info_Array:
+            if !is_simple_type(info.element_type^) do write_param_load(cc, s_offset, info.element_type^, l_offset)
+            length := type.size / info.element_type.size
+            l_offset^ += type.size - info.element_type.size
+            for i in 0..<length {
+                write_param_load(cc, s_offset, info.element_type^, l_offset)
+                l_offset^ -= info.element_type.size * 2
+            }
+            l_offset^ += type.size + info.element_type.size
+        case: unimplemented()
+    }
+
 }
 
 @(private="file")
@@ -267,8 +292,9 @@ write_store :: proc(using cc: ^Codegen_Context, inst: Instruction) {
         case Temporary:
             address_register: string
             defer free_temporary(cc, arg)
-    
-            if register, in_register := cc.ra.temp_to_memory[arg].(Register); in_register{
+            
+            register, in_register := cc.ra.temp_to_memory[arg].(Register)
+            if in_register{
                 address_register = register_string(register, 8)
             }else{
                 fmt.fprintfln(fd, "push rbx")
@@ -277,7 +303,7 @@ write_store :: proc(using cc: ^Codegen_Context, inst: Instruction) {
             }
             qualifier: Asm_Size = .QWORD if size == 8 else .BYTE
             fmt.fprintfln(fd, "mov %s [%s], %s", qualifier, address_register, value_operand)
-            fmt.fprintfln(fd, "pop rbx")
+            if !in_register do fmt.fprintfln(fd, "pop rbx")
         case Symbol_ID:
             fmt.fprintfln(fd, "mov %s, %s", symbol_str(cc, arg), value_operand)
         case: panic("Tried to store to a non-loadable operand")
@@ -286,10 +312,19 @@ write_store :: proc(using cc: ^Codegen_Context, inst: Instruction) {
 
 @(private="file")
 write_addr_of :: proc(using cc: ^Codegen_Context, inst: Instruction) {
+    result := temp_require_register(cc, inst.result.?)
+    fmt.fprintfln(fd, "lea %s, %s", result, symbol_str(cc, inst.arg_1, true))
+}
+
+@(private="file")
+write_offset :: proc(using cc: ^Codegen_Context, inst: Instruction) {
     result, in_register := save_temporary(cc, inst.result.?)
-    info := pool_get(cc.sp, inst.arg_1.(Symbol_ID)).data.(Local_Info)
-    fmt.fprintfln(fd, "mov %s, rbp", result)
-    fmt.fprintfln(fd, "sub %s, %d", result, info.address)
+    from := temporary_str(cc, inst.arg_1, false)
+    offset := immediate_str(cc, inst.arg_2)
+    register := result.(Register) if in_register else .rax
+    fmt.fprintfln(fd, "mov %s, %s", register, from)
+    fmt.fprintfln(fd, "add %s, %s", register, offset)
+    if !in_register do fmt.fprintfln(fd, "mov %s, rax", from)
 }
 
 @(private="file")
@@ -522,12 +557,15 @@ immediate_str :: proc(using cc: ^Codegen_Context, arg: Argument) -> string{
 }
 
 @(private="file")
-symbol_str :: proc(using cc: ^Codegen_Context, arg: Argument) -> (string){
+symbol_str :: proc(using cc: ^Codegen_Context, arg: Argument, address: bool = false) -> (string){
     symbol := pool_get(cc.sp, arg.(Symbol_ID))
 
     #partial switch info in symbol.data{
         case Local_Info:
             size := Asm_Size(info.type.size)
+            if address {
+                return fmt.aprintf("[rbp - %d]", info.address, allocator = context.temp_allocator)
+            }
             return fmt.aprintf("%s [rbp - %d]", size,  info.address, allocator = context.temp_allocator)
         case Foreign_Global_Info:
             already_externed := false

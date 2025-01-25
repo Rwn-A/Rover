@@ -1,13 +1,15 @@
-foreign fn log(float) float
-foreign fn printf(cstring, float, float, int)
+foreign fn printf(cstring, int, byte)
 foreign fn fflush(&int)
 foreign stdout: &int
 
 fn main() {
-    x: float = 120.5
-    y: float = log(x)
-    integer: int = 12
-    printf("%f %f %d", y, x, integer)
-    fflush(stdout)
-    
+   xs: [3]int = [1, 2, 3]
+   d: int = at(xs, 0)
+   printf("%d", d)
+   fflush(stdout)
+}
+
+fn at(arr: [3]int, idx: int) int {
+   c: &int = &arr
+   return ^(c + (idx * 8))
 }

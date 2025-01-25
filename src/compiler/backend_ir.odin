@@ -40,6 +40,7 @@ Opcode :: enum {
     Ret,
     Jmp,
     Addr_Of,
+    Offset,
     Jz,
     Eq,
     Nq,
@@ -81,6 +82,7 @@ ir_init :: proc(builder: ^IR_Builder, pool: ^Symbol_Pool, allocator: mem.Allocat
         pool = pool,
         symbol_allocator = allocator,
     }
+    sa.clear(&builder.free_temps)
     builder.program_buffer = make([dynamic]Instruction, allocator)
 }
 
@@ -96,8 +98,9 @@ ir_use_label :: proc(using builder: ^IR_Builder) -> Label{
 }
 
 @(private="file")
-ir_use_temporary :: proc(using builder: ^IR_Builder) -> Temporary{
+ir_use_temporary :: proc(using builder: ^IR_Builder, location := #caller_location) -> Temporary{
     free_temp, exists := sa.pop_front_safe(&builder.free_temps)
+    
     if !exists {
         free_temp = next_new_temp
         next_new_temp += 1
@@ -107,8 +110,14 @@ ir_use_temporary :: proc(using builder: ^IR_Builder) -> Temporary{
 
 //you can pass non-temporaries to this for ease of use but it wont do anything
 @(private="file")
-ir_release_temporary :: proc(using builder: ^IR_Builder, temp: Argument) {
+ir_release_temporary :: proc(using builder: ^IR_Builder, temp: Argument, location := #caller_location ) {
     if temp, is_temp := temp.(Temporary); is_temp{
+        for free_temp in builder.free_temps.data[0:free_temps.len] {
+            if temp == free_temp {
+                fmt.printfln("Double Temporary Free of temp %d at %v\n",temp, location)
+                return
+            }
+        }
         sa.push_back(&builder.free_temps, temp)
     }
 }
@@ -255,138 +264,224 @@ ir_build_return :: proc(using builder: ^IR_Builder, return_node: Return_Node) ->
     return true
 }
 
+Store_Callback :: proc(expr_context: ^Expr_Context, arg: Argument)
+
+Expr_Context :: struct {
+    dest_kind: enum {
+        Function_Argument,
+        Function_Return,
+        Memory,
+    },
+    base_adress: Argument,
+    type_info: Type_Info,
+    offset: i64,
+    builder: ^IR_Builder,
+    store_cb: Store_Callback,
+}
+
 @(private="file")
-ir_build_expression :: proc(using builder: ^IR_Builder, expr: Expression_Node) -> (arg: Argument, type: Type_Info, ok: bool) {
-       #partial switch expr_node in expr{
+ir_build_expression :: proc(using builder: ^IR_Builder, expr: Expression_Node, expr_ctx: ^Expr_Context = nil)  -> (res: Argument, type: Type_Info,  ok: bool) {
+    switch expr_node in expr {
+        case Literal_Int, Literal_Bool, Literal_Float, Literal_String: return ir_build_value_expression(builder, expr)
+        case ^Binary_Expression_Node:
+            if expr_node.operator.kind != .Equal do return ir_build_binary_expression(builder, expr_node^)
+            
+            if expr_ctx != nil {
+                error("Cannot have assignment expression in this context.", expr_node.operator.location)
+                return nil, {}, false
+            }
+            ir_build_assignment(builder, expr_node^) or_return
+
+            return nil, NULL_INFO, true
+        case ^Unary_Expression_Node:
+            if expr_node.operator.kind != .Hat do return ir_build_basic_unary(builder, expr_node^)
+            lvalue, type := ir_build_expression(builder, expr_node.rhs) or_return
+            loading_type :=  type.data.(Type_Info_Pointer).pointing_at^
+            arg := ir_build_load(builder, lvalue, loading_type, expr_ctx) or_return
+            return arg, loading_type, true
+        case Array_Literal_Node:
+            for entry in expr_node.entries{
+                arg, type := ir_build_expression(builder, entry, expr_ctx) or_return
+                defer if arg != nil do ir_release_temporary(builder, arg)
+                if arg != nil do expr_ctx.store_cb(expr_ctx, arg)
+            }
+            return nil, NULL_INFO, true
+        case Identifier_Node:
+            lvalue, type := ir_lvalue(builder, expr) or_return
+            arg := ir_build_load(builder, lvalue, type, expr_ctx) or_return
+            return arg, type, true
+        case Function_Call_Node: return ir_build_function_call(builder, expr_node, expr_ctx)
+        case: panic("Unreachable")
+    }
+}
+
+@(private="file")
+ir_build_assignment :: proc(using builder: ^IR_Builder, expr_node: Binary_Expression_Node) -> bool {
+    lvalue, type_info := ir_lvalue(builder, expr_node.lhs) or_return
+
+    ctx := Expr_Context{
+        dest_kind = .Memory,
+        builder =  builder,
+        base_adress = lvalue,
+        type_info = type_info,
+        offset = 0,
+        store_cb = store_callback_from_type(type_info),
+    }
+
+    value, _ := ir_build_expression(builder, expr_node.rhs, &ctx) or_return
+    defer if value != nil do ir_release_temporary(builder, value)
+
+    //nil value indicates there was a sub expression that was not a basic expression
+    //in such a case it would have already called the callback for itself.
+    if value != nil do ctx.store_cb(&ctx, value)
+
+    return true
+}
+
+@(private="file")
+ir_build_function_call :: proc(using builder: ^IR_Builder, expr_node: Function_Call_Node, expr_ctx: ^Expr_Context) -> (res: Argument, type: Type_Info,  ok: bool) {
+    Store_Arg :: proc(expr_ctx: ^Expr_Context, arg: Argument) {
+        ir_release_temporary(expr_ctx.builder, arg)
+        program_append(expr_ctx.builder, .Arg, arg)
+    }
+    callee := scope_find(&sm, expr_node.name) or_return
+    symbol := pool_get(sm.pool, callee)
+    
+    ctx := Expr_Context{
+        dest_kind = .Function_Argument,
+        store_cb = Store_Arg,
+        builder = builder,
+    }
+
+    #reverse for argument in expr_node.args {
+        arg_1, _ := ir_build_expression(builder, argument, &ctx) or_return
+        if arg_1 != nil do Store_Arg(&ctx, arg_1)
+    }
+
+    result: Maybe(Temporary) 
+    return_type := NULL_INFO
+    #partial switch data in symbol.data{
+        case Foreign_Info:
+            if data.return_type.size > 0 {
+                return_type = data.return_type
+                result = ir_use_temporary(builder) if data.return_type.size > 0 else nil
+            }
+        case Function_Info:
+            if data.return_type.size > 0 {
+                return_type = data.return_type
+                result = ir_use_temporary(builder) if data.return_type.size > 0 else nil
+            }
+        case: panic("unreachable")
+    }
+    program_append(builder, .Call, callee, nil, result)
+    if res, ok := result.?; ok do return res, return_type, true
+    return nil, return_type, true
+}
+
+@(private="file")
+ir_build_load :: proc(using builder: ^IR_Builder, from: Argument, type: Type_Info, expr_ctx: ^Expr_Context) -> (res: Argument,  ok: bool) {
+    if is_simple_type(type) {
+        result := ir_use_temporary(builder)
+        inst: Opcode = .LoadW if type.size == 8 else .LoadB
+        program_append(builder, inst, from, nil, result)
+        ir_release_temporary(builder, from)
+        return result, true
+    }
+
+    #partial switch info in type.data{
+        case Type_Info_Array:
+            length := type.size / info.element_type.size
+            from := from
+            defer ir_release_temporary(builder, from)
+            if sym_id, is_sym := from.(Symbol_ID); is_sym {
+                from = ir_use_temporary(builder)
+                program_append(builder, .Addr_Of, sym_id, nil, from.(Temporary))
+            }
+            for i in 0..<length {
+                next_address := ir_use_temporary(builder)
+                program_append(builder, .Offset, from, Immediate(i64(info.element_type.size)), next_address)
+                arg := ir_build_load(builder, from, info.element_type^, expr_ctx) or_return
+                if arg != nil do expr_ctx.store_cb(expr_ctx, arg)
+                from = next_address
+            }
+
+            return nil, true
+        case: unimplemented()
+    }
+}
+
+@(private="file")
+ir_build_basic_unary :: proc(using builder: ^IR_Builder, expr_node: Unary_Expression_Node) -> (res: Argument, type: Type_Info,  ok: bool) {
+    #partial switch expr_node.operator.kind{
+        case .Ampersand: 
+            arg_1, type := ir_lvalue(builder, expr_node.rhs) or_return
+            if _, is_ident := expr_node.rhs.(Identifier_Node); !is_ident{
+                error("Tried to address a non-identifier", expr_node.operator.location)
+            }
+            result := ir_use_temporary(builder)
+            pointing_at := new(Type_Info, sm.symbol_allocator)
+            pointing_at^ = type
+            program_append(builder, .Addr_Of, arg_1, nil, result)
+            return result, Type_Info{size = 8, data = Type_Info_Pointer{pointing_at = pointing_at}}, true
+        case .Dash:
+            arg_1, type := ir_build_expression(builder, expr_node.rhs) or_return
+            defer ir_release_temporary(builder, arg_1)
+            result := ir_use_temporary(builder)
+            program_append(builder, .Mul, arg_1, Immediate(i64(-1)), result)
+            return result, type, true
+        case: panic("Not a unary operator")
+    }
+}
+
+@(private="file")
+ir_build_binary_expression :: proc(using builder: ^IR_Builder, expr_node: Binary_Expression_Node) -> (res: Argument, type: Type_Info,  ok: bool) {
+    arg_1, type_1 := ir_build_expression(builder, expr_node.lhs) or_return
+    arg_2, type_2 := ir_build_expression(builder, expr_node.rhs) or_return
+    defer ir_release_temporary(builder, arg_1)
+    defer ir_release_temporary(builder, arg_2)
+    result := ir_use_temporary(builder)
+    if _, is_float := type_1.data.(Type_Info_Float); is_float{
+        #partial switch expr_node.operator.kind {
+            case .Plus: program_append(builder, .AddF, arg_1, arg_2, result)
+            case .Dash: program_append(builder, .SubF, arg_1, arg_2, result)
+            case .Asterisk: program_append(builder, .MulF, arg_1, arg_2, result)
+            case .SlashForward: program_append(builder, .DivF, arg_1, arg_2, result)
+            case .DoubleEqual: program_append(builder, .EqF, arg_1, arg_2, result)
+            case .LessThan: program_append(builder, .LtF, arg_1, arg_2, result)
+            case .LessThanEqual: program_append(builder, .LeF, arg_1, arg_2, result)
+            case .NotEqual: program_append(builder, .NqF, arg_1, arg_2, result)
+            case .GreaterThan: program_append(builder, .GtF, arg_1, arg_2, result)
+            case .GreaterThanEqual: program_append(builder, .GeF, arg_1, arg_2, result)
+            case: unimplemented()
+        }
+        return result, type_1, true
+    }
+    #partial switch expr_node.operator.kind {
+        case .Plus: program_append(builder, .Add, arg_1, arg_2, result)
+        case .Dash: program_append(builder, .Sub, arg_1, arg_2, result)
+        case .Asterisk: program_append(builder, .Mul, arg_1, arg_2, result)
+        case .SlashForward: program_append(builder, .Div, arg_1, arg_2, result)
+        case .DoubleEqual: program_append(builder, .Eq, arg_1, arg_2, result)
+        case .LessThan: program_append(builder, .Lt, arg_1, arg_2, result)
+        case .LessThanEqual: program_append(builder, .Le, arg_1, arg_2, result)
+        case .NotEqual: program_append(builder, .Nq, arg_1, arg_2, result)
+        case .GreaterThan: program_append(builder, .Gt, arg_1, arg_2, result)
+        case .GreaterThanEqual: program_append(builder, .Ge, arg_1, arg_2, result)
+        case: unimplemented()
+    }
+    return result, type_1, true
+}
+
+@(private="file")
+ir_build_value_expression :: proc(using builder: ^IR_Builder, expr: Expression_Node) -> (res: Argument, type: Type_Info,  ok: bool) {
+    #partial switch expr_node in expr{
         case Literal_Int: return Immediate(expr_node.data.(i64)), INTEGER_INFO, true
         case Literal_String: return Immediate(expr_node.data.(string)), CSTRING_INFO, true
         case Literal_Float: return Immediate(expr_node.data.(f64)), FLOAT_INFO, true
         case Literal_Bool:
-            #partial switch expr_node.kind{
-                case .True: return Immediate(byte(1)), BOOL_INFO, true
-                case .False: return Immediate(byte(0)), BOOL_INFO, true
-                case: panic("Unreachable")
-            }
-        case Identifier_Node:
-            arg_1, type := ir_lvalue(builder, expr) or_return
-            defer ir_release_temporary(builder, arg_1)
-            result := ir_use_temporary(builder)
-            switch type.size{
-                case WORD_SIZE: program_append(builder, .LoadW, arg_1, nil, result)
-                case BYTE_SIZE: program_append(builder, .LoadB, arg_1, nil, result)
-                case: panic("Got an unknown size")
-            }
-            return result, type, true
-        case ^Binary_Expression_Node: 
-            if expr_node.operator.kind == .Equal{
-               arg_1, type := ir_lvalue(builder, expr_node.lhs) or_return
-               arg_2, value_type := ir_build_expression(builder, expr_node.rhs) or_return
-               defer ir_release_temporary(builder, arg_2)
-               defer ir_release_temporary(builder, arg_1)
-               switch type.size{
-                    case WORD_SIZE: program_append(builder, .StoreW, arg_1, arg_2)
-                    case BYTE_SIZE: program_append(builder, .StoreB, arg_1, arg_2)
-                    case: panic("Got an unknown size")
-                }
-               return nil, NULL_INFO, true
-            }else{
-                arg_1, type_1 := ir_build_expression(builder, expr_node.lhs) or_return
-                arg_2, _ := ir_build_expression(builder, expr_node.rhs) or_return
-                defer ir_release_temporary(builder, arg_1)
-                defer ir_release_temporary(builder, arg_2)
-                result := ir_use_temporary(builder)
-                if _, is_float := type_1.data.(Type_Info_Float); is_float{
-                    #partial switch expr_node.operator.kind {
-                        case .Plus: program_append(builder, .AddF, arg_1, arg_2, result)
-                        case .Dash: program_append(builder, .SubF, arg_1, arg_2, result)
-                        case .Asterisk: program_append(builder, .MulF, arg_1, arg_2, result)
-                        case .SlashForward: program_append(builder, .DivF, arg_1, arg_2, result)
-                        case .DoubleEqual: program_append(builder, .EqF, arg_1, arg_2, result)
-                        case .LessThan: program_append(builder, .LtF, arg_1, arg_2, result)
-                        case .LessThanEqual: program_append(builder, .LeF, arg_1, arg_2, result)
-                        case .NotEqual: program_append(builder, .NqF, arg_1, arg_2, result)
-                        case .GreaterThan: program_append(builder, .GtF, arg_1, arg_2, result)
-                        case .GreaterThanEqual: program_append(builder, .GeF, arg_1, arg_2, result)
-                        case: unimplemented()
-                    }
-                    return result, type_1, true
-                }
-                #partial switch expr_node.operator.kind {
-                    case .Plus: program_append(builder, .Add, arg_1, arg_2, result)
-                    case .Dash: program_append(builder, .Sub, arg_1, arg_2, result)
-                    case .Asterisk: program_append(builder, .Mul, arg_1, arg_2, result)
-                    case .SlashForward: program_append(builder, .Div, arg_1, arg_2, result)
-                    case .DoubleEqual: program_append(builder, .Eq, arg_1, arg_2, result)
-                    case .LessThan: program_append(builder, .Lt, arg_1, arg_2, result)
-                    case .LessThanEqual: program_append(builder, .Le, arg_1, arg_2, result)
-                    case .NotEqual: program_append(builder, .Nq, arg_1, arg_2, result)
-                    case .GreaterThan: program_append(builder, .Gt, arg_1, arg_2, result)
-                    case .GreaterThanEqual: program_append(builder, .Ge, arg_1, arg_2, result)
-                    case: unimplemented()
-                }
-                return result, type_1, true
-            }
-        case ^Unary_Expression_Node:
-            #partial switch expr_node.operator.kind{
-                case .Ampersand: 
-                    arg_1, type := ir_lvalue(builder, expr_node.rhs) or_return
-                    if _, is_ident := expr_node.rhs.(Identifier_Node); !is_ident{
-                        error("Tried to address a non-identifier", expr_node.operator.location)
-                    }
-                    result := ir_use_temporary(builder)
-                    pointing_at := new(Type_Info, sm.symbol_allocator)
-                    pointing_at^ = type
-                    program_append(builder, .Addr_Of, arg_1, nil, result)
-                    return result, Type_Info{size = 8, data = Type_Info_Pointer{pointing_at = pointing_at}}, true
-                case .Hat:
-                    arg_1, type := ir_build_expression(builder, expr_node.rhs) or_return
-                    defer ir_release_temporary(builder, arg_1)
-                    result := ir_use_temporary(builder)
-                    switch type.data.(Type_Info_Pointer).pointing_at.size{
-                        case WORD_SIZE: program_append(builder, .LoadW, arg_1, nil, result)
-                        case BYTE_SIZE: program_append(builder, .LoadB, arg_1, nil, result)
-                        case: panic("Got an unknown size")
-                    }
-                    return result, type.data.(Type_Info_Pointer).pointing_at^, true
-                case .Dash:
-                    arg_1, type := ir_build_expression(builder, expr_node.rhs) or_return
-                    defer ir_release_temporary(builder, arg_1)
-                    result := ir_use_temporary(builder)
-                    program_append(builder, .Mul, arg_1, Immediate(i64(-1)), result)
-                    return result, type, true
-                case:
-                    error("Not a unary operator %s", expr_node.operator.location, expr_node.operator.kind)
-                    return nil, {}, false
-            }
-        case Function_Call_Node:
-            callee := scope_find(&sm, expr_node.name) or_return
-            symbol := pool_get(sm.pool, callee)
-
-            #reverse for argument in expr_node.args{
-                arg_1, _ := ir_build_expression(builder, argument) or_return
-                ir_release_temporary(builder, arg_1)
-                program_append(builder, .Arg, arg_1)
-            }
-            result: Maybe(Temporary) 
-            return_type := NULL_INFO
-            #partial switch data in symbol.data{
-                case Foreign_Info:
-                    if data.return_type.size > 0 {
-                        return_type = data.return_type
-                        result = ir_use_temporary(builder) if data.return_type.size > 0 else nil
-                    }
-                case Function_Info:
-                    if data.return_type.size > 0 {
-                        return_type = data.return_type
-                        result = ir_use_temporary(builder) if data.return_type.size > 0 else nil
-                    }
-                case: panic("unreachable")
-            }
-            program_append(builder, .Call, callee, nil, result)
-            if res, ok := result.?; ok do return res, return_type, true
-            return nil, return_type, true
-
-        case: unimplemented()
+            value: byte = 1 if expr_node.kind == .True else 0
+            return Immediate(value), BYTE_INFO, true
+        case: panic("Not a value expression")
     }
 }
 
@@ -412,6 +507,49 @@ ir_lvalue :: proc(using builder: ^IR_Builder, expr: Expression_Node) -> (res: Ar
             arg_1, type := ir_build_expression(builder, expr_node.rhs) or_return
             ir_release_temporary(builder, arg_1)
             return result, type.data.(Type_Info_Pointer).pointing_at^, true
+        case: unimplemented()
+    }
+}
+
+
+is_simple_type :: proc(type: Type_Info) -> bool {
+    #partial switch info in type.data{
+        case Type_Info_Array: return false
+        case: return true
+    }
+}
+
+@(private="file")
+store_callback_from_type :: proc(type: Type_Info) -> Store_Callback {
+    Store_Word :: proc(expr_context: ^Expr_Context, arg: Argument) {
+        defer ir_release_temporary(expr_context.builder, expr_context.base_adress)
+        program_append(expr_context.builder, .StoreW, expr_context.base_adress, arg)
+    }
+    Store_Byte :: proc(expr_context: ^Expr_Context, arg: Argument) {
+        defer ir_release_temporary(expr_context.builder, expr_context.base_adress)
+        program_append(expr_context.builder, .StoreB, expr_context.base_adress, arg)
+    }
+    Store_Array :: proc(expr_context: ^Expr_Context, arg: Argument) {
+        defer ir_release_temporary(expr_context.builder, arg)
+        element_size := expr_context.type_info.data.(Type_Info_Array).element_type.size
+        store_inst: Opcode = .StoreW if element_size == 8 else .StoreB
+        if sym_id, is_sym := expr_context.base_adress.(Symbol_ID); is_sym {
+            expr_context.base_adress = ir_use_temporary(expr_context.builder)
+            program_append(expr_context.builder, .Addr_Of, sym_id, nil, expr_context.base_adress.(Temporary))
+        }
+        next_address := ir_use_temporary(expr_context.builder)
+        program_append(expr_context.builder, .Offset, expr_context.base_adress, Immediate(i64(element_size)), next_address)
+        program_append(expr_context.builder, store_inst, expr_context.base_adress, arg)
+        ir_release_temporary(expr_context.builder, expr_context.base_adress)
+        expr_context.base_adress = next_address
+    }
+
+    if is_simple_type(type) {
+        return Store_Word if type.size == 8 else Store_Byte
+    }
+
+    #partial switch info in type.data{
+        case Type_Info_Array: return Store_Array
         case: unimplemented()
     }
 }

@@ -24,21 +24,23 @@ error :: proc(fmt_str: string, source_loc: File_Location, args: ..any) {
     fmt.eprintfln(fmt_str, ..args)
 }
 
-dump_ir :: proc(ir: IR_Program) {
-    print_argument :: proc(arg: Argument) {
+dump_ir :: proc(ir: IR_Program, sp: ^Symbol_Pool) {
+    print_argument :: proc(arg: Argument, sp: ^Symbol_Pool) {
         switch arg_val in arg{
             case Immediate: fmt.printf("%v ", arg_val)
-            case Symbol_ID: fmt.printf("S%v ", arg_val)
+            case Symbol_ID: 
+                symbol := pool_get(sp, arg_val)
+                fmt.printf("%v ", ident(symbol.name))
             case Temporary: fmt.printf("T%v ", arg_val)
-            case Label: fmt.printf("L%v ", arg_val)
+            case Label: fmt.printf("Label: %v ", arg_val)
             case: fmt.printf("---")
         }
     }
     for inst in ir{
         if temp, exists := inst.result.?; exists do fmt.printf("T%d = ", temp)
         fmt.printf("%v ", inst.opcode)
-        print_argument(inst.arg_1)
-        print_argument(inst.arg_2)
+        print_argument(inst.arg_1, sp)
+        print_argument(inst.arg_2, sp)
         
         fmt.println()
     }
