@@ -6,7 +6,7 @@ import "core:fmt"
 
 compile :: proc(filename: string) -> bool{
     //--compiler frontend--
-    fmt.printfln("[Info]: Opening source file %s.", filename)
+    fmt.printfln("[Info]: Opening source file %s...", filename)
     source, ok := os.read_entire_file(filename)
     if !ok {
         fatal("Failed to open file %s", filename)
@@ -53,7 +53,7 @@ compile :: proc(filename: string) -> bool{
 
     program := ir_build_program(&ir_context, ast) or_return
 
-    dump_ir(program, &symbol_pool)
+    //dump_ir(program, &symbol_pool)
 
     virtual.arena_destroy(&node_arena)
 

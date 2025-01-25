@@ -3,21 +3,19 @@ foreign fn fflush(&int)
 foreign stdout: &int
 
 fn main() {
-   bs: [2]byte = [92, 98]
-   take_byte(bs)
-   xs: [2]int = [4, 11]
-   take_int(xs)
-  
-}
+   xs: [500]int
+   
+   i: int = 0
+   while i < 500 {
+      xs.(i) = i
+      i = i + 1
+   }
 
-fn take_int(arr: [2]int) {
-   ptr: &int = &arr
-   printf("%d", ^ptr)
-   fflush(stdout)
-}
+   i = 0
+   while i < 500 {
+      printf("%d ", xs.(i))
+      i = i + 1
+   }
 
-fn take_byte(arr: [2]byte) {
-   ptr: &byte = &arr
-   printf("%d", ^(ptr + 1))
    fflush(stdout)
 }
