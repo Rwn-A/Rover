@@ -1,15 +1,23 @@
-foreign fn printf(cstring, int, byte)
+foreign fn printf(cstring, int)
 foreign fn fflush(&int)
 foreign stdout: &int
 
 fn main() {
-   xs: [3]int = [1, 2, 3]
-   d: int = at(xs, 0)
-   printf("%d", d)
+   bs: [2]byte = [92, 98]
+   take_byte(bs)
+   xs: [2]int = [4, 11]
+   take_int(xs)
+  
+}
+
+fn take_int(arr: [2]int) {
+   ptr: &int = &arr
+   printf("%d", ^ptr)
    fflush(stdout)
 }
 
-fn at(arr: [3]int, idx: int) int {
-   c: &int = &arr
-   return ^(c + (idx * 8))
+fn take_byte(arr: [2]byte) {
+   ptr: &byte = &arr
+   printf("%d", ^(ptr + 1))
+   fflush(stdout)
 }

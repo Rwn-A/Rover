@@ -212,9 +212,9 @@ write_param_load :: proc(using cc: ^Codegen_Context, s_offset: ^int, type: Type_
     if is_simple_type(type) {
         qualifer := Asm_Size(type.size)
         register := "rax" if type.size == 8 else "al"
-        fmt.fprintfln(fd, "mov %s, %s [rbp + %d]", register, qualifer, l_offset^)
+        fmt.fprintfln(fd, "mov rax, QWORD [rbp + %d]", l_offset^)
         fmt.fprintfln(fd, "mov %s [rbp - %d], %s", qualifer, s_offset^, register)
-        l_offset^ += type.size
+        l_offset^ += 8
         s_offset^ -= type.size
         return
     }
@@ -222,12 +222,14 @@ write_param_load :: proc(using cc: ^Codegen_Context, s_offset: ^int, type: Type_
         case Type_Info_Array:
             if !is_simple_type(info.element_type^) do write_param_load(cc, s_offset, info.element_type^, l_offset)
             length := type.size / info.element_type.size
-            l_offset^ += type.size - info.element_type.size
+            stack_size := length * 8 //byte arrays are promoted to full words when passing
+            l_offset^ += stack_size - 8
             for i in 0..<length {
                 write_param_load(cc, s_offset, info.element_type^, l_offset)
-                l_offset^ -= info.element_type.size * 2
+                l_offset^ -= 16
             }
-            l_offset^ += type.size + info.element_type.size
+            l_offset^ += stack_size + 8
+
         case: unimplemented()
     }
 
