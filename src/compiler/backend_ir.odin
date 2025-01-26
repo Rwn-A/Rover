@@ -134,6 +134,7 @@ ir_build_program :: proc(using builder: ^IR_Builder, ast: AST) -> (program: IR_P
             case Function_Node: scope_register(&sm, Symbol{resolved = false, name = decl.name, data=nil}) or_return
             case Foreign_Function_Node: scope_register(&sm, Symbol{resolved = false, name = decl.name, data = nil}) or_return
             case Foreign_Global_Node: scope_register(&sm, Symbol{resolved = false, name = decl.name, data = nil}) or_return
+            case Struct_Definition_Node: scope_register(&sm, Symbol{resolved = false, name = decl.name, data = nil}) or_return
         }
     }
 
@@ -274,7 +275,7 @@ Expr_Context :: struct {
     },
     base_adress: Argument,
     type_info: Type_Info,
-    offset: i64,
+    field_idx: i64,
     builder: ^IR_Builder,
     store_cb: Store_Callback,
 }
@@ -314,6 +315,13 @@ ir_build_expression :: proc(using builder: ^IR_Builder, expr: Expression_Node, e
                 if arg != nil do expr_ctx.store_cb(expr_ctx, arg)
             }
             return nil, NULL_INFO, true
+        case Struct_Literal_Node:
+            for value in expr_node.field_values{
+                arg, type := ir_build_expression(builder, value, expr_ctx) or_return
+                defer if arg != nil do ir_release_temporary(builder, arg)
+                if arg != nil do expr_ctx.store_cb(expr_ctx, arg)
+            }
+            return nil, NULL_INFO, true
         case Identifier_Node:
             lvalue, type := ir_lvalue(builder, expr) or_return
             arg := ir_build_load(builder, lvalue, type, expr_ctx) or_return
@@ -332,7 +340,7 @@ ir_build_assignment :: proc(using builder: ^IR_Builder, expr_node: Binary_Expres
         builder =  builder,
         base_adress = lvalue,
         type_info = type_info,
-        offset = 0,
+        field_idx = 0,
         store_cb = store_callback_from_type(type_info),
     }
 
@@ -412,9 +420,21 @@ ir_build_load :: proc(using builder: ^IR_Builder, from: Argument, type: Type_Inf
                 if arg != nil do expr_ctx.store_cb(expr_ctx, arg)
                 from = next_address
             }
-
             return nil, true
-        case: unimplemented()
+        case Type_Info_Struct:
+            from := from
+            if sym_id, is_sym := from.(Symbol_ID); is_sym {
+                from = ir_use_temporary(builder)
+                program_append(builder, .Addr_Of, sym_id, nil, from.(Temporary))
+            }
+            for field_type, i in info.field_types {
+                next_address := ir_use_temporary(builder)
+                program_append(builder, .Offset, from, Immediate(i64(info.field_offsets[i])), next_address)
+                arg := ir_build_load(builder, next_address, field_type, expr_ctx) or_return
+                if arg != nil do expr_ctx.store_cb(expr_ctx, arg)
+            }
+            return nil, true
+        case: panic("Unimplemented")
     }
 }
 
@@ -494,9 +514,20 @@ ir_build_value_expression :: proc(using builder: ^IR_Builder, expr: Expression_N
 }
 
 @(private="file")
-ir_lvalue :: proc(using builder: ^IR_Builder, expr: Expression_Node) -> (res: Argument, type: Type_Info,  ok: bool) {
+ir_lvalue :: proc(using builder: ^IR_Builder, expr: Expression_Node, cur_struct: Maybe(Type_Info) = nil) -> (res: Argument, type: Type_Info,  ok: bool) {
     #partial switch expr_node in expr{
         case Identifier_Node:
+            //struct field access
+            if struct_info, in_struct := cur_struct.?; in_struct{
+                data := struct_info.data.(Type_Info_Struct)
+                for field, i in data.field_names{
+                    if ident(field) != ident(Token(expr_node)) do continue
+                    result := ir_use_temporary(builder)
+                    program_append(builder, .Add, Immediate(i64(0)), Immediate(i64(data.field_offsets[i])), result)
+                    return result, data.field_types[i], true
+                }
+            }
+            //variable access
             symbol_id := scope_find(&builder.sm, Token(expr_node)) or_return
             symbol := pool_get(sm.pool, symbol_id)
             type_info: Type_Info
@@ -508,27 +539,33 @@ ir_lvalue :: proc(using builder: ^IR_Builder, expr: Expression_Node) -> (res: Ar
             return symbol_id, type_info, true
         case ^Binary_Expression_Node:
             assert(expr_node.operator.kind == .Dot)
-            if ident, is_ident := expr_node.rhs.(Identifier_Node); is_ident {
-                //indicates expression is x.b not x.(b)
-                if ident.location.position <= expr_node.operator.location.position + 1 {
-                    panic("Structs access not implemented")
-                }
-            }
-            index_expr, type := ir_build_expression(builder, expr_node.rhs) or_return
-            from_arg, lvalue_type := ir_lvalue(builder, expr_node.lhs) or_return
-            element_type := lvalue_type.data.(Type_Info_Array).element_type^
-            defer ir_release_temporary(builder, index_expr)
-            defer ir_release_temporary(builder, from_arg)
+            from_arg, from_type := ir_lvalue(builder, expr_node.lhs, cur_struct) or_return
             if sym, is_sym := from_arg.(Symbol_ID); is_sym {
                 from_arg = ir_use_temporary(builder)
                 program_append(builder, .Addr_Of, sym, nil, from_arg.(Temporary))
             }
-            index_result := ir_use_temporary(builder)
-            defer ir_release_temporary(builder, index_result)
-            program_append(builder, .Mul, index_expr, Immediate(i64(element_type.size)), index_result)
-            result := ir_use_temporary(builder)
-            program_append(builder, .Add, index_result, from_arg, result)
-            return result, element_type, true
+            defer ir_release_temporary(builder, from_arg)
+            #partial switch data in from_type.data{
+                case Type_Info_Array:
+                    index_expr, type := ir_build_expression(builder, expr_node.rhs) or_return
+                    element_type := from_type.data.(Type_Info_Array).element_type^
+                    defer ir_release_temporary(builder, index_expr)
+                    index_result := ir_use_temporary(builder)
+                    defer ir_release_temporary(builder, index_result)
+                    program_append(builder, .Mul, index_expr, Immediate(i64(element_type.size)), index_result)
+                    result := ir_use_temporary(builder)
+                    program_append(builder, .Add, index_result, from_arg, result)
+                    return result, element_type, true
+                case Type_Info_Struct:
+                    offset, type := ir_lvalue(builder, expr_node.rhs, from_type) or_return
+                    defer ir_release_temporary(builder, offset)
+                    result := ir_use_temporary(builder)
+                    program_append(builder, .Add, from_arg, offset, result)
+                    return result, type, true
+                case: 
+                    error("Expected array or structure after access", expr_node.operator.location)
+                    return nil, {}, false
+            }
         case ^Unary_Expression_Node:
             if expr_node.operator.kind != .Hat{
                 error("Expected a dereferance operator got %s", expr_node.operator.location, expr_node.operator.kind)
@@ -538,7 +575,9 @@ ir_lvalue :: proc(using builder: ^IR_Builder, expr: Expression_Node) -> (res: Ar
             arg_1, type := ir_build_expression(builder, expr_node.rhs) or_return
             ir_release_temporary(builder, arg_1)
             return result, type.data.(Type_Info_Pointer).pointing_at^, true
-        case: unimplemented()
+        case:
+            fatal("Not an lvalue %v", expr)
+            unreachable()
     }
 }
 
@@ -546,6 +585,7 @@ ir_lvalue :: proc(using builder: ^IR_Builder, expr: Expression_Node) -> (res: Ar
 is_simple_type :: proc(type: Type_Info) -> bool {
     #partial switch info in type.data{
         case Type_Info_Array: return false
+        case Type_Info_Struct: return false
         case: return true
     }
 }
@@ -574,6 +614,21 @@ store_callback_from_type :: proc(type: Type_Info) -> Store_Callback {
         ir_release_temporary(expr_context.builder, expr_context.base_adress)
         expr_context.base_adress = next_address
     }
+    Store_Struct :: proc(expr_context: ^Expr_Context, arg: Argument) {
+        defer ir_release_temporary(expr_context.builder, arg)
+        info := expr_context.type_info.data.(Type_Info_Struct)
+        if sym_id, is_sym := expr_context.base_adress.(Symbol_ID); is_sym {
+            expr_context.base_adress = ir_use_temporary(expr_context.builder)
+            program_append(expr_context.builder, .Addr_Of, sym_id, nil, expr_context.base_adress.(Temporary))
+        }
+        next_address := ir_use_temporary(expr_context.builder)
+        offset := i64(info.field_offsets[expr_context.field_idx])
+        defer expr_context.field_idx += 1
+        store_inst: Opcode = .StoreW if info.field_types[expr_context.field_idx].size == 8 else .StoreB
+        program_append(expr_context.builder, .Offset, expr_context.base_adress, Immediate(offset), next_address)
+        program_append(expr_context.builder, store_inst, next_address, arg)
+        ir_release_temporary(expr_context.builder, next_address)
+    }
 
     if is_simple_type(type) {
         return Store_Word if type.size == 8 else Store_Byte
@@ -581,6 +636,7 @@ store_callback_from_type :: proc(type: Type_Info) -> Store_Callback {
 
     #partial switch info in type.data{
         case Type_Info_Array: return Store_Array
+        case Type_Info_Struct: return Store_Struct
         case: unimplemented()
     }
 }

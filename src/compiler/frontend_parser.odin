@@ -9,6 +9,7 @@ Declaration_Node :: union {
     Function_Node,
     Foreign_Function_Node,
     Foreign_Global_Node,
+    Struct_Definition_Node,
 }
 
 Statement :: union {
@@ -23,6 +24,11 @@ Foreign_Function_Node :: struct {
     name: Token,
     param_types: []Type_Node,
     return_type: Maybe(Type_Node),
+}
+
+Struct_Definition_Node :: struct {
+    name: Token,
+    fields: []Variable_Node,
 }
 
 Foreign_Global_Node :: distinct Variable_Node
@@ -76,11 +82,16 @@ Expression_Node :: union {
     ^Binary_Expression_Node,
     ^Unary_Expression_Node,
     Array_Literal_Node,
+    Struct_Literal_Node,
     Function_Call_Node,
 }
 
 Array_Literal_Node :: struct {
     entries: []Expression_Node,
+}
+
+Struct_Literal_Node :: struct {
+    field_values: []Expression_Node,
 }
 
 Literal_Int :: distinct Token
@@ -156,6 +167,7 @@ parser_parse :: proc(using parser: ^Parser, node_allocator: mem.Allocator) -> (a
     for token.kind != .EOF{
         #partial switch token.kind {
             case .Fn: append(&ast_builder, parse_function_node(parser) or_return)
+            case .Struct: append(&ast_builder, parse_struct_node(parser) or_return)
             case .Foreign:
                 if peek.kind == .Fn do append(&ast_builder, parse_foreign_function(parser) or_return)
                 else do append(&ast_builder, parse_foreign_global(parser) or_return)
@@ -223,6 +235,29 @@ parse_function_node :: proc(using parser: ^Parser) -> (node: Function_Node, ok: 
     for token.kind != .Rbrace do append(&body_builder, parse_statement(parser) or_return)
     parser_assert(parser, .Rbrace)
     node.body = body_builder[:]
+
+    return node, true
+}
+
+@(private="file")
+parse_struct_node :: proc(using parser: ^Parser,) -> (node: Struct_Definition_Node, ok: bool) {
+    parser_advance(parser) or_return
+    node.name = parser_assert_identifier(parser) or_return
+    parser_assert(parser, .Lbrace) or_return
+
+    field_builder := make([dynamic]Variable_Node)
+    for token.kind != .Rbrace{
+        field_decl := parse_statement(parser) or_return
+        if field, is_field := field_decl.(Variable_Node); is_field {
+            append(&field_builder, field)
+        }else{
+            error("Expected parameter definition, got %v", node.name.location, field_decl)
+            return {}, false
+        }
+        if token.kind == .Comma do parser_advance(parser) or_return
+    }
+    parser_assert(parser, .Rbrace) or_return
+    node.fields = field_builder[:]
 
     return node, true
 }
@@ -362,6 +397,7 @@ parse_primary_expression :: proc(using parser: ^Parser, prec: Operator_Precedenc
         case .String: expr = cast(Literal_String)token
         case .Lparen: expr = parse_grouped(parser) or_return
         case .Lbracket: expr = parse_array_literal(parser) or_return
+        case .Lbrace: expr = parse_struct_literal(parser) or_return
         case .Hat, .ExclamationMark, .Ampersand, .Dash: expr = parse_prefix(parser) or_return
         case .Identifier:
             #partial switch peek.kind {
@@ -409,6 +445,21 @@ parse_array_literal :: proc(using parser: ^Parser) -> (expr: Expression_Node, ok
         }
     }
     return Array_Literal_Node{entries = entry_builder[:]}, true
+}
+
+@(private="file")
+parse_struct_literal :: proc(using parser: ^Parser) -> (expr: Expression_Node, ok: bool) {
+    parser_advance(parser) or_return
+    field_values := make([dynamic]Expression_Node)
+    for token.kind != .Rbrace{
+        append(&field_values, parse_primary_expression(parser, .Lowest) or_return)
+        parser_advance(parser) or_return
+        if token.kind == .Comma{
+            parser_advance(parser) or_return
+            continue
+        }
+    }
+    return Struct_Literal_Node{field_values = field_values[:]}, true
 }
 
 @(private="file")

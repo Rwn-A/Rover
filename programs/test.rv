@@ -2,20 +2,23 @@ foreign fn printf(cstring, int)
 foreign fn fflush(&int)
 foreign stdout: &int
 
+struct Inner {
+   x: int,
+}
+
+struct Data {
+   u: int,
+   v: int,
+   d: Inner,
+}
+
 fn main() {
-   xs: [5]int
-   
-   i: int = 0
-   while i < 5 {
-      xs.(i) = i
-      i = i + 1
-   }
+   r: Data = {1, 2, {5}}
+   x: int = take(r)
+}
 
-   i = 0
-   while i < 5 {
-      printf("%d ", xs.(i))
-      i = i + 1
-   }
-
+fn take(s: Data) int {
+   printf("%d", s.d.x)
    fflush(stdout)
+   return 1
 }

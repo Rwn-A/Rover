@@ -10,13 +10,14 @@ Currently supported features include:
 - Control Flow (If statements and while statements)
 - Basic arithmetic (+, -, *, /)
 - Pointers
+- Structures
 - Arrays (1 Dimensional)
 - FFI* (Can call into C functions and access global variables from C)
 
 _*FFI is not completely implemented, Rover types do not always align with C types and a certain amount of C functions that have lots of parameters or paramaters of certain types will not be called correctly._ 
 
 Planned features include:
-- Structures, Slices
+- Slices
 - Importing other source files
 - More robust FFI, (Not aiming for complete compatibility with C but good for most functions)
 - Type Checking in the Compiler

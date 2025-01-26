@@ -61,6 +61,7 @@ Type_Info :: struct {
         Type_Info_Byte,
         Type_Info_Pointer,
         Type_Info_Array,
+        Type_Info_Struct,
     }
 }
 
@@ -71,6 +72,12 @@ Type_Info_Bool :: struct {}
 Type_Info_Byte :: struct {}
 Type_Info_Pointer :: struct {pointing_at: ^Type_Info}
 Type_Info_Array :: struct{element_type: ^Type_Info}
+Type_Info_Struct :: struct {
+    field_names: []Token,
+    field_types: []Type_Info,
+    field_offsets: []int,
+    alignment: int,
+}
 
 
 scope_open :: proc(using sm: ^Scope_Manager) {
@@ -184,6 +191,34 @@ scope_register_global_declaration :: proc(using sm: ^Scope_Manager, decl_node: D
             symbol.resolved = true
             symbol.data = data
             return true 
+        case Struct_Definition_Node:
+            data := Type_Info_Struct{}
+
+            data.field_names = make([]Token, len(decl.fields))
+            data.field_types = make([]Type_Info, len(decl.fields))
+            data.field_offsets = make([]int, len(decl.fields))
+            data.alignment = 0
+
+            current_size: int = 0
+            //current_offset: int = 0
+            for field_node, i in decl.fields{
+                field_type := create_type_info(sm, field_node.type) or_return
+                data.field_types[i] = field_type
+                data.field_names[i] = field_node.name
+
+                alignment := get_alignment(field_type)
+                if alignment > data.alignment do data.alignment = alignment
+                offset := align_address(current_size, alignment)
+                data.field_offsets[i] = offset
+
+                current_size = offset + field_type.size
+            }
+            current_size = align_address(current_size, data.alignment)
+            
+            symbol := &pool[scope_find(sm, decl.name) or_return] 
+            symbol.resolved = true
+            symbol.data = Type_Info{size = current_size, data = data}
+            return true 
         case Foreign_Function_Node:
             data := Foreign_Info{}
 
@@ -194,7 +229,7 @@ scope_register_global_declaration :: proc(using sm: ^Scope_Manager, decl_node: D
                 data.return_type = create_type_info(sm, decl.return_type.?) or_return
             }
 
-            arg_builder := make([dynamic]Type_Info)
+            arg_builder := make([dynamic]Type_Info, symbol_allocator)
             for ast_type in decl.param_types{
                 append(&arg_builder, create_type_info(sm, ast_type) or_return)
             }
@@ -204,7 +239,6 @@ scope_register_global_declaration :: proc(using sm: ^Scope_Manager, decl_node: D
             symbol.resolved = true
             symbol.data = data
             return true 
-        
         case Foreign_Global_Node:
             type := create_type_info(sm, decl.type) or_return
             symbol := &pool[scope_find(sm, decl.name) or_return] 
@@ -226,4 +260,23 @@ scope_register_variable :: proc(using sm: ^Scope_Manager, decl: Variable_Node, c
     scope_register(sm, symbol) or_return
     current_fn_info.locals_size += type.size
     return true
+}
+
+get_alignment :: proc(type_info: Type_Info) -> int {
+    #partial switch data in type_info.data{
+        case Type_Info_Array: return get_alignment(data.element_type^)
+        case Type_Info_Struct: return data.alignment
+        case: return type_info.size
+    }
+}
+
+//what do i need to add to an address to satisfy an alignment
+align_address :: proc(address: int, alignment: int) -> int {
+    // Ensure alignment is a power of 2
+    if alignment <= 0 || (alignment & (alignment - 1)) != 0 {
+        panic("Compiler Error: Tried to align a complex type")
+    }
+
+    // Calculate aligned address
+    return (address + alignment - 1) & ~(alignment - 1);
 }

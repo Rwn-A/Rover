@@ -203,6 +203,7 @@ write_function_header :: proc(using cc: ^Codegen_Context, inst: Instruction) {
     for param_id in info.param_ids{
         param := pool_get(sp, param_id)
         param_info := param.data.(Local_Info)
+        fmt.println(param_info.address)
         write_param_load(cc, &param_info.address, param_info.type, &offset)
     }
 }
@@ -215,7 +216,6 @@ write_param_load :: proc(using cc: ^Codegen_Context, s_offset: ^int, type: Type_
         fmt.fprintfln(fd, "mov rax, QWORD [rbp + %d]", l_offset^)
         fmt.fprintfln(fd, "mov %s [rbp - %d], %s", qualifer, s_offset^, register)
         l_offset^ += 8
-        s_offset^ -= type.size
         return
     }
     #partial switch info in type.data{
@@ -226,9 +226,20 @@ write_param_load :: proc(using cc: ^Codegen_Context, s_offset: ^int, type: Type_
             l_offset^ += stack_size - 8
             for i in 0..<length {
                 write_param_load(cc, s_offset, info.element_type^, l_offset)
+                s_offset^ -= type.size
                 l_offset^ -= 16
             }
             l_offset^ += stack_size + 8
+        case Type_Info_Struct:
+           s_offset^ -= type.size - info.field_types[0].size
+           for field, i in info.field_types {
+                s_offset^ += info.field_offsets[i]
+                if !is_simple_type(field) do write_param_load(cc, s_offset, field, l_offset)
+                write_param_load(cc, s_offset, field, l_offset)
+                s_offset^ -= info.field_offsets[i]
+
+
+           }
 
         case: unimplemented()
     }

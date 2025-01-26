@@ -53,7 +53,7 @@ compile :: proc(filename: string) -> bool{
 
     program := ir_build_program(&ir_context, ast) or_return
 
-    //dump_ir(program, &symbol_pool)
+    dump_ir(program, &symbol_pool)
 
     virtual.arena_destroy(&node_arena)
 
