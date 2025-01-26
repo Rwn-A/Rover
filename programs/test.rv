@@ -2,15 +2,17 @@ foreign fn printf(cstring, int)
 foreign fn fflush(&int)
 foreign stdout: &int
 
-struct Inner {
-   x: int,
-}
-
 struct Data {
    u: int,
    v: int,
    d: Inner,
 }
+
+struct Inner {
+   x: int,
+}
+
+
 
 fn main() {
    r: Data = {1, 2, {5}}

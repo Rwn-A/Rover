@@ -28,7 +28,9 @@ Symbol :: struct{
         Local_Info,
         Foreign_Info,
         Foreign_Global_Info,
-    }
+    },
+    ast_node: Declaration_Node, //not safe to access after IR is generated, used in early stages of symbol resolving
+
 }
 
 Function_Info :: struct {
@@ -153,6 +155,9 @@ create_type_info :: proc(using sm: ^Scope_Manager, ast_node: Type_Node) -> (info
         case Symbol_Type:
             symbol_id, exists := scope_find(sm, ast_type)
             if !exists do return {}, false
+            if sym := pool_get(pool, symbol_id); sym.resolved == false {
+                scope_register_global_declaration(sm, sym.ast_node) or_return
+            }
             info, is_type := pool_get(pool, symbol_id).data.(Type_Info)
             if !is_type {
                 error("Symbol %v was expected to be a type", ast_type.location, ident(ast_type))
@@ -176,6 +181,8 @@ create_type_info :: proc(using sm: ^Scope_Manager, ast_node: Type_Node) -> (info
 scope_register_global_declaration :: proc(using sm: ^Scope_Manager, decl_node: Declaration_Node) -> bool {
     switch decl in decl_node{
         case Function_Node:
+            symbol := &pool[scope_find(sm, decl.name) or_return] 
+            if symbol.resolved do return true
             data := Function_Info{}
 
             return_type, exists := decl.return_type.?
@@ -187,11 +194,12 @@ scope_register_global_declaration :: proc(using sm: ^Scope_Manager, decl_node: D
 
             data.locals_size = 0 //this will be updated by ir generator
             
-            symbol := &pool[scope_find(sm, decl.name) or_return] 
             symbol.resolved = true
             symbol.data = data
             return true 
         case Struct_Definition_Node:
+            symbol := &pool[scope_find(sm, decl.name) or_return] 
+            if symbol.resolved do return true
             data := Type_Info_Struct{}
 
             data.field_names = make([]Token, len(decl.fields))
@@ -215,11 +223,12 @@ scope_register_global_declaration :: proc(using sm: ^Scope_Manager, decl_node: D
             }
             current_size = align_address(current_size, data.alignment)
             
-            symbol := &pool[scope_find(sm, decl.name) or_return] 
             symbol.resolved = true
             symbol.data = Type_Info{size = current_size, data = data}
             return true 
         case Foreign_Function_Node:
+            symbol := &pool[scope_find(sm, decl.name) or_return] 
+            if symbol.resolved do return true
             data := Foreign_Info{}
 
             return_type, exists := decl.return_type.?
@@ -235,13 +244,13 @@ scope_register_global_declaration :: proc(using sm: ^Scope_Manager, decl_node: D
             }
             data.arg_types = arg_builder[:]
             
-            symbol := &pool[scope_find(sm, decl.name) or_return] 
             symbol.resolved = true
             symbol.data = data
             return true 
         case Foreign_Global_Node:
-            type := create_type_info(sm, decl.type) or_return
             symbol := &pool[scope_find(sm, decl.name) or_return] 
+            if symbol.resolved do return true
+            type := create_type_info(sm, decl.type) or_return
             symbol.resolved = true
             symbol.data = Foreign_Global_Info(type)
             return true

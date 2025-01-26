@@ -203,7 +203,6 @@ write_function_header :: proc(using cc: ^Codegen_Context, inst: Instruction) {
     for param_id in info.param_ids{
         param := pool_get(sp, param_id)
         param_info := param.data.(Local_Info)
-        fmt.println(param_info.address)
         write_param_load(cc, &param_info.address, param_info.type, &offset)
     }
 }

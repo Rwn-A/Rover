@@ -129,12 +129,12 @@ ir_build_program :: proc(using builder: ^IR_Builder, ast: AST) -> (program: IR_P
     scope_register_builtins(&sm)
 
     //forward declare all global symbols
-    for decl_node in ast{
-        switch decl in decl_node{
+    for &decl_node in ast{
+        switch &decl in decl_node{
             case Function_Node: scope_register(&sm, Symbol{resolved = false, name = decl.name, data=nil}) or_return
             case Foreign_Function_Node: scope_register(&sm, Symbol{resolved = false, name = decl.name, data = nil}) or_return
             case Foreign_Global_Node: scope_register(&sm, Symbol{resolved = false, name = decl.name, data = nil}) or_return
-            case Struct_Definition_Node: scope_register(&sm, Symbol{resolved = false, name = decl.name, data = nil}) or_return
+            case Struct_Definition_Node: scope_register(&sm, Symbol{resolved = false, name = decl.name, data = nil, ast_node = decl}) or_return
         }
     }
 
