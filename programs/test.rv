@@ -3,24 +3,18 @@ foreign fn fflush(&int)
 foreign stdout: &int
 
 struct Data {
-   u: int,
-   v: int,
-   d: Inner,
-}
-
-struct Inner {
    x: int,
+   y: int,
+   buffer: [5]byte, //structure of arrays is supported, but array of structures is not.
 }
 
-
+fn get_buffer_idx(d: Data, idx: int) byte {
+   return d.buffer.idx
+}
 
 fn main() {
-   r: Data = {1, 2, {5}}
-   x: int = take(r)
-}
-
-fn take(s: Data) int {
-   printf("%d", s.d.x)
+   d: Data
+   d.buffer.0 = 10
+   printf("%d", get_buffer_idx(d, 2))
    fflush(stdout)
-   return 1
 }
